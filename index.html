@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1219,6 +1220,9 @@ td .btn-xs + .btn-xs { margin-left: 3px; }
         <button class="login-role-btn" id="roleBtn_teacher" onclick="setLoginRole('teacher')">
           <i class="fas fa-chalkboard-teacher"></i> Teacher
         </button>
+        <button class="login-role-btn" id="roleBtn_viewer" onclick="setLoginRole('viewer')">
+          <i class="fas fa-search"></i> Details Search
+        </button>
       </div>
       <div class="login-field">
         <label>Username</label>
@@ -1356,6 +1360,119 @@ function genStudentID(){
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 
 // ===========================
+//  GOVERNMENT STUDENT RECORDS (UDISE / Banglar Shiksha)
+// ===========================
+const GOV_STATUS_META={
+  'ID_CREATED':             {label:'ID Created',                       icon:'🟢', badge:'badge-success', color:'#15803d', bg:'#dcfce7'},
+  'FORM_SUBMITTED':         {label:'Form Submitted',                   icon:'🟡', badge:'badge-warning', color:'#a16207', bg:'#fef9c3'},
+  'EXISTING_ID_IN_GOVT_SCHOOL':{label:'Existing ID in Government School',icon:'🔵', badge:'badge-info',    color:'#1e40af', bg:'#dbeafe'},
+  'FORM_NOT_SUBMITTED':     {label:'Form Not Submitted',               icon:'🔴', badge:'badge-danger',  color:'#b91c1c', bg:'#fee2e2'}
+};
+const GOV_BUCKET_META={
+  green:  {...GOV_STATUS_META.ID_CREATED},
+  yellow: {...GOV_STATUS_META.FORM_SUBMITTED},
+  blue:   {...GOV_STATUS_META.EXISTING_ID_IN_GOVT_SCHOOL},
+  red:    {...GOV_STATUS_META.FORM_NOT_SUBMITTED}
+};
+function govBucket(rec){
+  if(rec.status==='ID_CREATED') return 'green';
+  if(rec.status==='FORM_SUBMITTED') return 'yellow';
+  if(rec.status==='EXISTING_ID_IN_GOVT_SCHOOL') return 'blue';
+  return 'red'; // FORM_NOT_SUBMITTED (default)
+}
+
+// ── Age & Government Class Verification (kept separate — a distinct DOB-vs-class check, not part of the DCF record) ──
+const GOV_AGE_DIFF_REASONS=['Age-appropriate class difference','Student progressed earlier','Previous school/class record','Government portal existing record','Previous admission history','Special circumstance','Other'];
+function defaultGovAgeRules(){
+  return [
+    {govClass:'Pre-Primary', minAge:5, maxAge:6, schoolClasses:['Lower Nursery A','Lower Nursery B','Upper Nursery A','Upper Nursery B','Preparatory']},
+    {govClass:'Class 1', minAge:6, maxAge:7, schoolClasses:['Class 1 A','Class 1 B']},
+    {govClass:'Class 2', minAge:7, maxAge:8, schoolClasses:['Class 2']},
+    {govClass:'Class 3', minAge:8, maxAge:9, schoolClasses:['Class 3']},
+    {govClass:'Class 4', minAge:9, maxAge:10, schoolClasses:['Class 4']}
+  ];
+}
+function getGovAgeRules(){ return ls('govAgeRules')||defaultGovAgeRules(); }
+function saveGovAgeRules(rules){ ss('govAgeRules',rules); }
+function ageAsOfJan1(dob,year){
+  if(!dob) return null;
+  const d=new Date(dob);
+  if(isNaN(d.getTime())) return null;
+  const jan1=new Date(year,0,1);
+  let age=jan1.getFullYear()-d.getFullYear();
+  if(jan1.getMonth()<d.getMonth()||(jan1.getMonth()===d.getMonth()&&jan1.getDate()<d.getDate())) age--;
+  return age;
+}
+function findGovClassForSchoolClass(cls){
+  const rules=getGovAgeRules();
+  const r=rules.find(r=>(r.schoolClasses||[]).includes(cls));
+  return r?r.govClass:null;
+}
+// Returns {age, ageAppropriateClass, schoolMappedClass, mismatch, applicable}
+function computeAgeVerification(student,sessionYear){
+  const age=ageAsOfJan1(student.dob,sessionYear);
+  const schoolMappedClass=findGovClassForSchoolClass(student.class);
+  if(age===null||!schoolMappedClass) return {age,ageAppropriateClass:null,schoolMappedClass,mismatch:false,applicable:false};
+  const rules=getGovAgeRules();
+  const r=rules.find(r=>age>=r.minAge&&age<r.maxAge);
+  const ageAppropriateClass=r?r.govClass:null;
+  const mismatch=!!ageAppropriateClass && ageAppropriateClass!==schoolMappedClass;
+  return {age,ageAppropriateClass,schoolMappedClass,mismatch,applicable:true};
+}
+
+function getAllGovRecords(){ return ls('govRecords')||{}; }
+function getGovRecord(studentId){
+  const all=getAllGovRecords();
+  return all[studentId]||defaultGovRecord();
+}
+// Simplified government record — ONLY status, one optional government ID, and remarks.
+function defaultGovRecord(){
+  return {
+    status:'FORM_NOT_SUBMITTED',
+    banglarShikshaId:'',
+    remarks:'',
+    // Age-verification fields (separate concern, see computeAgeVerification above)
+    governmentPortalClass:'', ageDifferenceReason:'', ageDifferenceExplanation:'', ageVerificationStatus:'Not Reviewed', ageSupportingDocNote:'',
+    createdBy:'', updatedBy:'', createdAt:'', updatedAt:''
+  };
+}
+function saveGovRecord(studentId,patch){
+  const all=getAllGovRecords();
+  const existing=all[studentId]||defaultGovRecord();
+  const merged={...existing,...patch,updatedBy:(currentUser&&currentUser.name)||'Principal',updatedAt:new Date().toISOString()};
+  if(!existing.createdAt) merged.createdAt=merged.updatedAt;
+  all[studentId]=merged;
+  ss('govRecords',all);
+  logGovActivity(studentId,patch);
+  return merged;
+}
+function logGovActivity(studentId,patch){
+  try{
+    const log=ls('govActivityLog')||[];
+    const students=ls('students')||[];
+    const s=students.find(x=>x.id===studentId);
+    Object.keys(patch||{}).forEach(field=>{
+      log.push({studentId,studentName:s?s.name:'',field,newValue:patch[field],user:(currentUser&&currentUser.name)||'Principal',ts:new Date().toISOString()});
+    });
+    ss('govActivityLog',log.slice(-500));
+  }catch(e){}
+}
+function computeGovStats(students){
+  const all=getAllGovRecords();
+  const stats={total:students.length,ID_CREATED:0,FORM_SUBMITTED:0,EXISTING_ID_IN_GOVT_SCHOOL:0,FORM_NOT_SUBMITTED:0,green:0,yellow:0,blue:0,red:0};
+  students.forEach(s=>{
+    const rec=all[s.id]||defaultGovRecord();
+    if(stats[rec.status]!==undefined) stats[rec.status]++;
+    stats[govBucket(rec)]++;
+  });
+  return stats;
+}
+function govStatusBadge(status){
+  const m=GOV_STATUS_META[status]||GOV_STATUS_META['FORM_NOT_SUBMITTED'];
+  return `<span class="badge ${m.badge}" style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap"><span>${m.icon}</span>${m.label}</span>`;
+}
+
+// ===========================
 //  DATA STORE
 // ===========================
 function initData(){
@@ -1395,7 +1512,7 @@ let currentUser=null;
 let loginRole='principal';
 
 function setLoginRole(role){
-  ['principal','accountant','teacher'].forEach(r=>{
+  ['principal','accountant','teacher','viewer'].forEach(r=>{
     const btn=document.getElementById('roleBtn_'+r);
     if(btn) btn.className='login-role-btn'+(r===role?' active':'');
   });
@@ -1504,7 +1621,7 @@ function startApp(){
   document.getElementById('app').classList.add('visible');
   document.getElementById('userAvatar').textContent=(currentUser.name||currentUser.username)[0].toUpperCase();
   document.getElementById('userNameDisplay').textContent=currentUser.name||currentUser.username;
-  document.getElementById('userRoleDisplay').textContent=currentUser.role==='principal'?'Principal':currentUser.role==='accountant'?'Accountant':'Teacher';
+  document.getElementById('userRoleDisplay').textContent=currentUser.role==='principal'?'Principal':currentUser.role==='accountant'?'Accountant':currentUser.role==='viewer'?'Details Search':'Teacher';
   // Rebuild session select from localStorage sessions
   const sessions = ls('sessions')||['2025','2026','2027','2028'];
   const active = getActiveSession();
@@ -1514,7 +1631,7 @@ function startApp(){
     sel.value = active;
   }
   buildNav();
-  showPage('dashboard');
+  showPage((currentUser.role==='viewer'||currentUser.role==='principal')?'studentSearch':'dashboard');
   if(typeof initCloudSyncOnStart==='function') initCloudSyncOnStart();
 }
 
@@ -1523,6 +1640,7 @@ function startApp(){
 // ===========================
 const NAV_ALL=[
   {id:'dashboard',icon:'fas fa-tachometer-alt',label:'Dashboard',roles:['principal','accountant','teacher']},
+  {id:'studentSearch',icon:'fas fa-search',label:'⚡ Fast Search',roles:['viewer','principal','accountant','teacher']},
   {id:'schoolToday',icon:'fas fa-broadcast-tower',label:'School Today',roles:['principal']},
   {id:'students',icon:'fas fa-user-graduate',label:'Students',roles:['principal','accountant']},
   {id:'needAttention',icon:'fas fa-exclamation-triangle',label:'Students Need Attention',roles:['principal','teacher']},
@@ -1563,11 +1681,13 @@ const NAV_ALL=[
   {id:'coCurricular',icon:'fas fa-medal',label:'Co-Curricular',roles:['principal','teacher']},
   {id:'substitute',icon:'fas fa-exchange-alt',label:'Substitute Teachers',roles:['principal']},
   {id:'substituteHistory',icon:'fas fa-history',label:'Substitute History',roles:['principal']},
-  {id:'taskReport',icon:'fas fa-tasks',label:'Task Report',roles:['principal']},
-  {id:'examPlanner',icon:'fas fa-calendar-alt',label:'Exam Planner',roles:['principal']},
   {id:'helpdesk',icon:'fas fa-headset',label:'Helpdesk',roles:['principal','accountant','teacher']},
   {id:'complaints',icon:'fas fa-comment-dots',label:'Complaints',roles:['principal']},
   {id:'documents',icon:'fas fa-folder-open',label:'Documents',roles:['principal','accountant']},
+  {id:'govDashboard',icon:'fas fa-landmark',label:'Government ID Dashboard',roles:['principal']},
+  {id:'govClassRecords',icon:'fas fa-table',label:'Class-wise Govt. Report',roles:['principal','accountant']},
+  {id:'govFollowUp',icon:'fas fa-exclamation-triangle',label:'Pending Follow-up',roles:['principal']},
+  {id:'govAgeVerification',icon:'fas fa-birthday-cake',label:'Age & Class Verification',roles:['principal']},
   {id:'assets',icon:'fas fa-laptop',label:'Assets',roles:['principal']},
   {id:'dataManagement',icon:'fas fa-database',label:'Data Management',roles:['principal']},
   {id:'settings',icon:'fas fa-cog',label:'Settings',roles:['principal']},
@@ -1576,12 +1696,13 @@ const NAV_ALL=[
 function buildNav(){
   const role = currentUser.role;
   const groups = [
-    { label:'📊 Overview', pages:['dashboard','schoolToday','taskReport','examPlanner'] },
+    { label:'📊 Overview', pages:['dashboard','schoolToday','studentSearch'] },
     { label:'👨‍🎓 Students & Parents', pages:['students','needAttention','promotion','conduct','coCurricular','ptmBooking'] },
     { label:'📚 Academic', pages:['attendance','monthlyAttendance','examRegister','teacherMarks','marks','reportCard','performance','top10','timetable','routine','syllabus','examMgmt','hallTicket','admitCard','lessonPlan','logbook'] },
     { label:'👥 Staff', pages:['teachers','substitute'] },
     { label:'💰 Finance', pages:['feeCollection','dueReport','dueNotice','feeRegister','cashBook','feeSettings','allTransactions','finance','stock'] },
     { label:'📢 Communication', pages:['notices','calendar','helpdesk','complaints','documents'] },
+    { label:'🏛 Government Records', pages:['govDashboard','govClassRecords','govFollowUp','govAgeVerification'] },
     { label:'🏢 School', pages:['assets','idCard','academicSettings','sessionSettings','dataManagement','settings'] },
   ];
   let html = '';
@@ -1603,7 +1724,7 @@ function buildNav(){
 
 function showPage(pageId){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.page===pageId));
-  const titles={dashboard:'Dashboard',schoolToday:'School Today',substituteHistory:'Substitute History',taskReport:'Task Report',examPlanner:'Exam Planner',students:'Student Management',needAttention:'Students Need Attention',teachers:'Teacher Management',feeCollection:'Fee Collection',feeSettings:'Fee Settings',dueReport:'Due Report',dueNotice:'Due Notice Cards',feeRegister:'Fee Register',cashBook:'Society Cash Book',attendance:'Daily Attendance',examRegister:'Student Exam Register',marks:'Marks & Results',reportCard:'Report Card',routine:'Class Routine',notices:'Notice Board',calendar:'School Calendar',stock:'Stock & Shop',finance:'Financial Analysis',promotion:'Session Promotion',idCard:'ID Card Generator',dataManagement:'Data Management',settings:'Settings',academicSettings:'Class Manager & Academic Settings',sessionSettings:'Session Settings',syllabus:'Syllabus Manager',admitCard:'Admit Cards',performance:'Performance Analysis',monthlyAttendance:'Monthly Attendance Entry',allTransactions:'All Transactions',top10:'🏆 Top 10 Result Board',timetable:'📅 Timetable Management',examMgmt:'📋 Exam Management',hallTicket:'🎫 Hall Ticket Generator',lessonPlan:'📖 Lesson Planning',logbook:'📓 Teaching Logbook',ptmBooking:'🤝 PTM Booking',conduct:'🛡️ Conduct & Discipline',coCurricular:'🏅 Co-Curricular Activities',substitute:'🔄 Substitute Teachers',helpdesk:'🎧 Helpdesk',complaints:'💬 Complaints',documents:'📁 Documents',assets:'💻 Asset Register'};
+  const titles={dashboard:'Dashboard',schoolToday:'School Today',substituteHistory:'Substitute History',students:'Student Management',needAttention:'Students Need Attention',teachers:'Teacher Management',feeCollection:'Fee Collection',feeSettings:'Fee Settings',dueReport:'Due Report',dueNotice:'Due Notice Cards',feeRegister:'Fee Register',cashBook:'Society Cash Book',attendance:'Daily Attendance',examRegister:'Student Exam Register',marks:'Marks & Results',reportCard:'Report Card',routine:'Class Routine',notices:'Notice Board',calendar:'School Calendar',stock:'Stock & Shop',finance:'Financial Analysis',promotion:'Session Promotion',idCard:'ID Card Generator',dataManagement:'Data Management',settings:'Settings',academicSettings:'Class Manager & Academic Settings',sessionSettings:'Session Settings',syllabus:'Syllabus Manager',admitCard:'Admit Cards',performance:'Performance Analysis',monthlyAttendance:'Monthly Attendance Entry',allTransactions:'All Transactions',top10:'🏆 Top 10 Result Board',timetable:'📅 Timetable Management',examMgmt:'📋 Exam Management',hallTicket:'🎫 Hall Ticket Generator',lessonPlan:'📖 Lesson Planning',logbook:'📓 Teaching Logbook',ptmBooking:'🤝 PTM Booking',conduct:'🛡️ Conduct & Discipline',coCurricular:'🏅 Co-Curricular Activities',substitute:'🔄 Substitute Teachers',helpdesk:'🎧 Helpdesk',complaints:'💬 Complaints',documents:'📁 Documents',assets:'💻 Asset Register',govDashboard:'🏛 Government ID Dashboard',govClassRecords:'🏛 Class-wise Government Records',govFollowUp:'⚠️ Pending Government ID Follow-up',govAgeVerification:'🎂 Age & Government Class Verification',studentSearch:'⚡ Fast Search'};
   document.getElementById('topbarTitle').textContent=titles[pageId]||pageId;
   const content=document.getElementById('mainContent');
   // Reset any leftover transitions, set opacity 0, render, then fade in
@@ -1651,8 +1772,6 @@ function renderPage(p){
     case 'dashboard': return renderDashboard();
     case 'schoolToday': return renderSchoolToday();
     case 'substituteHistory': return renderSubstituteHistory();
-    case 'taskReport': return renderTaskReport();
-    case 'examPlanner': return renderExamPlanner();
     case 'students': return renderStudents();
     case 'needAttention': return renderNeedAttention();
     case 'teachers': return renderTeachers();
@@ -1694,6 +1813,11 @@ function renderPage(p){
     case 'helpdesk': return renderHelpdesk();
     case 'complaints': return renderComplaints();
     case 'documents': return renderDocuments();
+    case 'studentSearch': return renderStudentSearch();
+    case 'govDashboard': return renderGovDashboard();
+    case 'govClassRecords': return renderGovClassRecords();
+    case 'govFollowUp': return renderGovFollowUp();
+    case 'govAgeVerification': return renderGovAgeVerification();
     case 'assets': return renderAssets();
     case 'dataManagement': return renderDataManagement();
     case 'settings': return renderSettings();
@@ -2098,31 +2222,16 @@ function renderSchoolToday(){
     </div>`;
   })()}
 
-  ${(function(){
-    if(typeof getTasks!=='function') return '';
-    const tasks = syncTaskStatuses();
-    const c = taskCounts(tasks);
-    if(!tasks.length) return '';
-    const followUp = tasks.filter(t=>t.status==='Overdue').slice(0,3);
-    return `<div class="card" style="margin-bottom:16px;cursor:pointer" onclick="showPage('taskReport')">
-      <div class="card-title"><i class="fas fa-tasks"></i> Task Report</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-bottom:${followUp.length?'10px':'0'}">
-        <div style="padding:8px;background:#f8faff;border-radius:8px;text-align:center"><div style="font-weight:900">${c.total}</div><div class="text-xs text-muted">Total</div></div>
-        <div style="padding:8px;background:#f0fdf4;border-radius:8px;text-align:center"><div style="font-weight:900;color:#16a34a">${c.completed}</div><div class="text-xs text-muted">🟢 Done</div></div>
-        <div style="padding:8px;background:#fef9c3;border-radius:8px;text-align:center"><div style="font-weight:900;color:#a16207">${c.pending}</div><div class="text-xs text-muted">🟡 Pending</div></div>
-        <div style="padding:8px;background:#fee2e2;border-radius:8px;text-align:center"><div style="font-weight:900;color:#b91c1c">${c.overdue}</div><div class="text-xs text-muted">🔴 Overdue</div></div>
-      </div>
-      ${followUp.length?`<div style="font-size:11.5px;color:#b91c1c;font-weight:700">⚠️ Follow up: ${followUp.map(t=>esc(t.assignedToName)+' — '+esc(t.title)).join('; ')}</div>`:''}
-    </div>`;
-  })()}
-
-  ${typeof renderExamAlertsCard==='function' ? renderExamAlertsCard() : ''}
-
   ${absentTeachers.length?`
   <div class="card" style="margin-bottom:16px;border-left:4px solid #dc2626">
     <div class="card-title"><i class="fas fa-user-slash" style="color:#dc2626"></i> Today's Substitute Planning</div>
     <div id="subPlanningBody">${renderSubstitutePlanningBody()}</div>
   </div>`:''}
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title"><i class="fas fa-table"></i> Today's Whole School Routine</div>
+    <div id="stRoutineGrid">${renderWholeSchoolRoutineGrid()}</div>
+  </div>
 
   <div class="dash-grid">
     <div class="card">
@@ -2180,15 +2289,90 @@ function renderSchoolToday(){
       <button class="btn btn-outline btn-sm" onclick="showPage('needAttention')"><i class="fas fa-exclamation-triangle"></i> Need Attention</button>
       <button class="btn btn-outline btn-sm" onclick="showPage('feeCollection')"><i class="fas fa-rupee-sign"></i> Today's Collection</button>
       <button class="btn btn-outline btn-sm" onclick="showPage('substituteHistory')"><i class="fas fa-history"></i> Substitute History</button>
-      <button class="btn btn-outline btn-sm" onclick="showPage('taskReport')"><i class="fas fa-tasks"></i> Task Report</button>
-      <button class="btn btn-outline btn-sm" onclick="showPage('examPlanner')"><i class="fas fa-calendar-alt"></i> Exam Planner</button>
     </div>
+  </div>`;
+}
+
+// ── Whole-school routine grid for TODAY: classes × periods, colour-coded live status ──
+function renderWholeSchoolRoutineGrid(){
+  const day=CURRENT_ROUTINE_DAY;
+  if(typeof isSchoolDay!=='function'||!isSchoolDay()||!day){
+    return `<div class="text-muted text-sm" style="padding:14px;text-align:center">😴 No school today.</div>`;
+  }
+  const session=getActiveSession();
+  const students=ls('students')||[];
+  const classes=getAllClasses().filter(c=>students.some(s=>s.session===session&&c===s.class));
+  const routine=ls('routine')||{};
+  const dateKey=today();
+  const pt=getPeriodTimings();
+  const liveSlot=getLiveSlot(pt);
+  const currentPi=liveSlot?liveSlot.pi:null;
+  const subsToday=getSubstituteAssignments().filter(a=>a.date===dateKey&&a.status!=='Cancelled');
+  const periods=[0,1,2,'t',3,4];
+  const periodLabel=pi=>pi==='t'?'Tiffin':'P'+(Number(pi)+1);
+
+  function cellFor(cls,pi){
+    if(pi==='t') return {type:'tiffin'};
+    const cell=((routine[cls]||{})[day]||{})[pi];
+    if(!cell||!cell.subject) return {type:'free'};
+    const teacher=cell.teacher||'';
+    const isAbsent=teacher&&isTeacherAbsentOn(teacher,dateKey,day);
+    if(!isAbsent) return {type:'normal',subject:cell.subject,teacher};
+    const sub=subsToday.find(a=>a.day===day&&a.period===pi&&a.class===cls);
+    if(sub) return {type:'substitute',subject:cell.subject,teacher:sub.substituteTeacherName,original:teacher};
+    return {type:'absent',subject:cell.subject,teacher};
+  }
+
+  const cellStyle={
+    tiffin:  {bg:'#f1f5f9', border:'#e2e8f0'},
+    free:    {bg:'#f8fafc', border:'#e2e8f0'},
+    normal:  {bg:'#ffffff', border:'#e2e8f0'},
+    absent:  {bg:'#fee2e2', border:'#fca5a5'},
+    substitute:{bg:'#fef9c3', border:'#fde047'}
+  };
+
+  return `
+  <div style="overflow-x:auto">
+  <table style="width:100%;border-collapse:collapse;font-size:11.5px;min-width:900px">
+    <thead><tr>
+      <th style="position:sticky;left:0;background:#1a3a6b;color:white;padding:8px 10px;text-align:left;z-index:2;min-width:110px">Class</th>
+      ${periods.map(pi=>`<th style="background:${pi===currentPi?'#c9a84c':'#1a3a6b'};color:white;padding:8px 8px;text-align:center;min-width:110px">
+        ${periodLabel(pi)}${pi===currentPi?' <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4ade80;animation:pulse 1.5s infinite"></span>':''}
+        <div style="font-weight:600;font-size:9.5px;opacity:.85">${periodTimeLabel(pi)}</div>
+      </th>`).join('')}
+    </tr></thead>
+    <tbody>
+      ${classes.map(cls=>`<tr>
+        <td style="position:sticky;left:0;background:#f8faff;font-weight:800;padding:8px 10px;border:1px solid #e2e8f0;color:#0d1f3c;z-index:1">${esc(cls)}</td>
+        ${periods.map(pi=>{
+          const c=cellFor(cls,pi);
+          const st=cellStyle[c.type];
+          const live=pi===currentPi;
+          return `<td style="padding:6px 8px;border:1px solid ${st.border};background:${c.type==='free'||c.type==='tiffin'?st.bg:st.bg};${live?'outline:2px solid #c9a84c;outline-offset:-2px':''}">
+            ${c.type==='tiffin'?`<div style="text-align:center;color:#64748b;font-weight:700">☕ Tiffin</div>`
+            : c.type==='free'?`<div style="text-align:center;color:#94a3b8;font-size:10.5px">Free</div>`
+            : c.type==='absent'?`<div style="font-weight:800;color:#b91c1c">${esc(c.subject)}</div><div style="color:#7f1d1d;font-size:10px">🔴 ${esc(c.teacher)} — ABSENT</div>`
+            : c.type==='substitute'?`<div style="font-weight:800;color:#a16207">${esc(c.subject)}</div><div style="color:#854d0e;font-size:10px">🟡 ${esc(c.teacher)} (Sub for ${esc(c.original)})</div>`
+            : `<div style="font-weight:700;color:#1a2740">${esc(c.subject)}</div><div style="color:#64748b;font-size:10px">${esc(c.teacher)}</div>`}
+            ${live&&c.type!=='tiffin'&&c.type!=='free'?`<div style="font-size:9px;font-weight:800;color:#a16207;margin-top:2px">● LIVE</div>`:''}
+          </td>`;
+        }).join('')}
+      </tr>`).join('')}
+    </tbody>
+  </table>
+  </div>
+  <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:10.5px;color:#64748b">
+    <span><span style="display:inline-block;width:10px;height:10px;background:#fee2e2;border:1px solid #fca5a5;border-radius:3px;margin-right:4px"></span>Absent — no substitute</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:#fef9c3;border:1px solid #fde047;border-radius:3px;margin-right:4px"></span>Substitute assigned</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:3px;margin-right:4px"></span>Free period</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:#ffffff;border:2px solid #c9a84c;border-radius:3px;margin-right:4px"></span>Current live period</span>
   </div>`;
 }
 
 function refreshSchoolToday(){
   const hero=document.getElementById('stHero'); if(hero) hero.innerHTML=renderCurrentPeriodHero();
   const banner=document.getElementById('stAlertBanner'); if(banner) banner.innerHTML=renderSubstituteAlertBanner();
+  const grid=document.getElementById('stRoutineGrid'); if(grid) grid.innerHTML=renderWholeSchoolRoutineGrid();
   refreshSubstitutePlanning();
 }
 
@@ -2254,950 +2438,6 @@ function printSubstituteHistory(){
       <tbody>${rows.map(r=>`<tr><td>${fmtDate(r.date)}</td><td>P${r.period+1}</td><td>${esc(r.class)}</td><td>${esc(r.subject)}</td><td>${esc(r.originalTeacherName)}</td><td>${esc(r.substituteTeacherName)}</td><td>${r.status==='Cancelled'?'Cancelled':r.principalConfirmed?'Confirmed in Class':'Assigned'}</td><td>${r.noticeDelivered?'Yes — '+fmtDate(r.deliveredAt):'No'}</td><td>${r.principalConfirmed?'Yes — '+fmtDate(r.confirmedAt):'No'}</td></tr>`).join('')}</tbody>
     </table>`;
   printWindow('Substitute History', body);
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-//  TASK REPORT / TASK MANAGER — School Today
-// ═══════════════════════════════════════════════════════════════════════
-function getTasks(){ return ls('tasks')||[]; }
-function saveTasks(list){ ss('tasks', list); }
-function genTaskId(){
-  const yr = new Date().getFullYear();
-  const existing = getTasks().filter(t=>t.id.startsWith('TASK-'+yr));
-  const num = String(existing.length+1).padStart(4,'0');
-  return `TASK-${yr}-${num}`;
-}
-function taskStatusBadge(status){
-  const map={
-    'Pending':['🔴 Pending','#fee2e2','#b91c1c'],
-    'In Progress':['🟡 In Progress','#fef9c3','#a16207'],
-    'Ready':['🟢 Ready for Submission','#dcfce7','#166534'],
-    'Submitted':['🟢 Submitted','#dcfce7','#166534'],
-    'Completed':['🟢 Completed','#dcfce7','#166534'],
-    'Overdue':['⚠️ Overdue','#fee2e2','#b91c1c'],
-    'Action Required':['🟡 Action Required','#fef9c3','#a16207'],
-  };
-  const [label,bg,color]=map[status]||map.Pending;
-  return `<span class="badge" style="padding:5px 10px;border-radius:20px;font-size:12px;font-weight:700;display:inline-block;white-space:nowrap;background:${bg};color:${color}">${label}</span>`;
-}
-function taskPriorityBadge(p){
-  const map={High:['🔴 High','#fee2e2','#b91c1c'],Medium:['🟡 Medium','#fef9c3','#a16207'],Low:['🟢 Low','#dcfce7','#166534']};
-  const [label,bg,color]=map[p]||map.Medium;
-  return `<span class="badge" style="padding:5px 10px;border-radius:20px;font-size:12px;font-weight:700;display:inline-block;white-space:nowrap;background:${bg};color:${color}">${label}</span>`;
-}
-// Lazily promote Pending/In Progress tasks whose due date has passed to Overdue.
-// Marks-linked tasks compute their live progress from actual marks data instead
-// of trusting a manually-set status, so a teacher cannot fake completion.
-function syncTaskStatuses(){
-  const tasks = getTasks();
-  const dateKey = today();
-  let changed=false;
-  tasks.forEach(t=>{
-    if(t.linkedMarksTask && (t.status==='Pending'||t.status==='In Progress'||t.status==='Ready')){
-      const subs = getSubjects(t.linkedMarksTask.class, t.linkedMarksTask.term||'1');
-      const sub = subs.find(sb=>sb.label===t.linkedMarksTask.subject);
-      if(sub){
-        const st = tmMarksStatus(t.linkedMarksTask.class, t.linkedMarksTask.term||'1', sub.key, sub.hasOral);
-        const newStatus = st.level==='green'?'Ready':st.level==='yellow'?'In Progress':'Pending';
-        if(t.status!==newStatus){ t.status=newStatus; changed=true; }
-      }
-    }
-    if((t.status==='Pending'||t.status==='In Progress'||t.status==='Ready') && t.dueDate && t.dueDate<dateKey){
-      t.status='Overdue'; changed=true;
-    }
-  });
-  if(changed) saveTasks(tasks);
-  return tasks;
-}
-function taskDaysInfo(dueDate){
-  if(!dueDate) return {set:false};
-  const todayMs = new Date(today()+'T00:00:00').getTime();
-  const dueMs = new Date(dueDate+'T00:00:00').getTime();
-  const days = Math.round((dueMs-todayMs)/86400000);
-  return {set:true, days};
-}
-function taskSmartLine(dueDate){
-  const info = taskDaysInfo(dueDate);
-  if(!info.set) return 'Please complete and submit the task as soon as possible.';
-  if(info.days<0) return '🚨 This task is overdue. Please complete it and submit it to the school office as soon as possible.';
-  if(info.days===0) return '🚨 The task deadline is TODAY. Please complete and submit it to the school office immediately.';
-  if(info.days===1) return '⚠️ The deadline is tomorrow. Please complete and submit the task urgently.';
-  if(info.days<=3) return `⚠️ Only ${info.days} day${info.days!==1?'s':''} remain. Please complete the task and submit it to the school office as soon as possible.`;
-  return 'Please complete and submit the task within the scheduled deadline.';
-}
-
-function createTask(data){
-  const tasks = getTasks();
-  const task = Object.assign({
-    id: genTaskId(),
-    createdBy: currentUser?.name||'Principal',
-    createdAt: new Date().toISOString(),
-    startDate: today(),
-    status: 'Pending',
-    submittedAt:null, submissionNote:'', attachmentName:'',
-    approvedBy:null, approvedAt:null, returnNote:'',
-    reminderHistory:[]
-  }, data);
-  tasks.push(task);
-  saveTasks(tasks);
-  return task;
-}
-// Called from Marks Entry's "Create Task Automatically" option — avoids duplicate
-// tasks for the same teacher/class/subject/term.
-function createOrLinkMarksTask(teacherId, teacherName, cls, subject, term, dueDate){
-  const tasks = getTasks();
-  const existing = tasks.find(t=>t.linkedMarksTask && t.assignedToId===teacherId &&
-    t.linkedMarksTask.class===cls && t.linkedMarksTask.subject===subject && t.linkedMarksTask.term===term &&
-    t.status!=='Completed');
-  if(existing){ existing.dueDate=dueDate||existing.dueDate; saveTasks(tasks); return existing; }
-  return createTask({
-    title:`Complete ${cls} ${subject} Term ${term} Marks`,
-    category:'Marks Entry', assignedToId:teacherId, assignedToName:teacherName,
-    class:cls, subject, priority:'Medium',
-    description:`Complete ${cls} ${subject} Term ${term} marks entry and submit the completed report to the school office.`,
-    dueDate: dueDate||getMarksDeadline()||'',
-    linkedMarksTask:{class:cls, subject, term}
-  });
-}
-
-function openCreateTaskModal(){
-  const teachers = ls('teachers')||[];
-  const classes = getAllClasses();
-  openModal('➕ Create Task',`
-    <div class="form-group"><label>Task Title</label><input id="ctTitle" placeholder='e.g. "Term 1 Mathematics Marks Entry"' style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
-    <div class="form-row">
-      <div class="form-group"><label>Assign To</label>
-        <select id="ctTeacher" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px">
-          ${teachers.map(t=>`<option value="${t.id}" data-name="${esc(t.name)}">${esc(t.name)}</option>`).join('')}
-        </select>
-      </div>
-      <div class="form-group"><label>Category</label>
-        <select id="ctCategory" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px">
-          ${['Marks Entry','Attendance','Academic','Syllabus','Lesson Plan','Report','Notice','Administrative','Other'].map(c=>`<option>${c}</option>`).join('')}
-        </select>
-      </div>
-    </div>
-    <div class="form-group"><label>Description</label><textarea id="ctDesc" rows="3" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></textarea></div>
-    <div class="form-row">
-      <div class="form-group"><label>Class (optional)</label>
-        <select id="ctClass" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"><option value="">—</option>${classes.map(c=>`<option>${esc(c)}</option>`).join('')}</select>
-      </div>
-      <div class="form-group"><label>Subject (optional)</label><input id="ctSubject" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Priority</label>
-        <select id="ctPriority" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px">
-          <option value="High">🔴 High</option><option value="Medium" selected>🟡 Medium</option><option value="Low">🟢 Low</option>
-        </select>
-      </div>
-      <div class="form-group"><label>Due Date</label><input id="ctDueDate" type="date" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
-    </div>
-  `,[{label:'<i class="fas fa-save"></i> Save Task',cls:'btn-primary',onclick:'saveNewTask()'},{label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}],'modal-lg');
-}
-function saveNewTask(){
-  const title = document.getElementById('ctTitle')?.value.trim();
-  const teacherSel = document.getElementById('ctTeacher');
-  const teacherId = teacherSel?.value;
-  const teacherName = teacherSel?.options[teacherSel.selectedIndex]?.dataset.name;
-  const dueDate = document.getElementById('ctDueDate')?.value;
-  if(!title||!teacherId||!dueDate){ toast('Title, teacher and due date are required','error'); return; }
-  createTask({
-    title, category:document.getElementById('ctCategory').value,
-    assignedToId:teacherId, assignedToName:teacherName,
-    class:document.getElementById('ctClass').value, subject:document.getElementById('ctSubject').value,
-    description:document.getElementById('ctDesc').value,
-    priority:document.getElementById('ctPriority').value,
-    dueDate
-  });
-  toast('✅ Task created');
-  closeModal();
-  refreshTaskReportPage();
-}
-
-function taskCounts(list){
-  return {
-    total:list.length,
-    completed:list.filter(t=>t.status==='Completed').length,
-    inProgress:list.filter(t=>t.status==='In Progress').length,
-    pending:list.filter(t=>t.status==='Pending').length,
-    overdue:list.filter(t=>t.status==='Overdue').length,
-    submitted:list.filter(t=>t.status==='Submitted').length,
-  };
-}
-
-function renderTaskReport(){
-  const tasks = syncTaskStatuses();
-  const teachers = ls('teachers')||[];
-  const classes = getAllClasses();
-  const c = taskCounts(tasks);
-  const dateKey = today();
-  const todaysTasks = tasks.filter(t=>t.dueDate===dateKey || t.createdAt.slice(0,10)===dateKey || t.status==='Overdue' || t.status==='Submitted');
-
-  return `
-  <div class="section-header">
-    <div class="section-title"><i class="fas fa-tasks" style="color:var(--gold)"></i> Task Report</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-success btn-sm" onclick="openRemindAllPendingTasks()"><i class="fab fa-whatsapp"></i> Remind All Pending</button>
-      <button class="btn btn-outline btn-sm" onclick="printTaskReport()"><i class="fas fa-print"></i> Print Task Report</button>
-      <button class="btn btn-primary btn-sm" onclick="openCreateTaskModal()"><i class="fas fa-plus"></i> Create Task</button>
-    </div>
-  </div>
-
-  <div class="stats-grid">
-    <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-clipboard-list"></i></div><div class="stat-info"><div class="stat-label">Total Tasks</div><div class="stat-value">${c.total}</div></div></div>
-    <div class="stat-card success"><div class="stat-icon green"><i class="fas fa-check"></i></div><div class="stat-info"><div class="stat-label">Completed</div><div class="stat-value">${c.completed}</div></div></div>
-    <div class="stat-card warning"><div class="stat-icon orange"><i class="fas fa-hourglass-half"></i></div><div class="stat-info"><div class="stat-label">In Progress</div><div class="stat-value">${c.inProgress}</div></div></div>
-    <div class="stat-card danger"><div class="stat-icon red"><i class="fas fa-clock"></i></div><div class="stat-info"><div class="stat-label">Pending</div><div class="stat-value">${c.pending}</div></div></div>
-    <div class="stat-card danger"><div class="stat-icon red"><i class="fas fa-exclamation-triangle"></i></div><div class="stat-info"><div class="stat-label">Overdue</div><div class="stat-value">${c.overdue}</div></div></div>
-  </div>
-
-  ${todaysTasks.length?`
-  <div class="card" style="margin-bottom:16px;border-left:4px solid #eab308">
-    <div class="card-title"><i class="fas fa-calendar-day"></i> Today's Tasks</div>
-    ${todaysTasks.sort((a,b)=>(a.priority==='High'?0:1)-(b.priority==='High'?0:1)).map(t=>`
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#f8faff;border-radius:8px;margin-bottom:6px;font-size:12.5px;cursor:pointer" onclick="openTaskDetail('${t.id}')">
-        <span>${esc(t.assignedToName)} — ${esc(t.title)} ${t.class?`(${esc(t.class)})`:''}</span>
-        <span>${taskPriorityBadge(t.priority)} ${taskStatusBadge(t.status)}</span>
-      </div>`).join('')}
-  </div>`:''}
-
-  <div class="card" style="margin-bottom:16px">
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px">
-      <input id="tkSearch" placeholder="Search task/teacher..." oninput="refreshTaskReportList()" style="padding:8px;border:2px solid var(--border);border-radius:8px;font-size:12px">
-      <select id="tkFilterTeacher" onchange="refreshTaskReportList()" style="padding:8px;border:2px solid var(--border);border-radius:8px;font-size:12px"><option value="">All Teachers</option>${teachers.map(t=>`<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('')}</select>
-      <select id="tkFilterClass" onchange="refreshTaskReportList()" style="padding:8px;border:2px solid var(--border);border-radius:8px;font-size:12px"><option value="">All Classes</option>${classes.map(c=>`<option>${esc(c)}</option>`).join('')}</select>
-      <select id="tkFilterCategory" onchange="refreshTaskReportList()" style="padding:8px;border:2px solid var(--border);border-radius:8px;font-size:12px"><option value="">All Categories</option>${['Marks Entry','Attendance','Academic','Syllabus','Lesson Plan','Report','Notice','Administrative','Other'].map(c=>`<option>${c}</option>`).join('')}</select>
-      <select id="tkFilterStatus" onchange="refreshTaskReportList()" style="padding:8px;border:2px solid var(--border);border-radius:8px;font-size:12px">
-        <option value="">All Status</option><option>Pending</option><option>In Progress</option><option>Submitted</option><option>Completed</option><option>Overdue</option>
-      </select>
-      <select id="tkFilterPriority" onchange="refreshTaskReportList()" style="padding:8px;border:2px solid var(--border);border-radius:8px;font-size:12px"><option value="">All Priority</option><option>High</option><option>Medium</option><option>Low</option></select>
-    </div>
-  </div>
-
-  <div id="tkListBody">${renderTaskReportList()}</div>`;
-}
-
-function refreshTaskReportPage(){
-  const el = document.getElementById('mainContent');
-  if(document.getElementById('tkListBody')) { renderPage('taskReport'); return; }
-}
-function refreshTaskReportList(){
-  const el = document.getElementById('tkListBody');
-  if(el) el.innerHTML = renderTaskReportList();
-}
-function renderTaskReportList(){
-  let tasks = syncTaskStatuses();
-  const search = (document.getElementById('tkSearch')?.value||'').toLowerCase();
-  const fTeacher = document.getElementById('tkFilterTeacher')?.value||'';
-  const fClass = document.getElementById('tkFilterClass')?.value||'';
-  const fCategory = document.getElementById('tkFilterCategory')?.value||'';
-  const fStatus = document.getElementById('tkFilterStatus')?.value||'';
-  const fPriority = document.getElementById('tkFilterPriority')?.value||'';
-  if(search) tasks = tasks.filter(t=>t.title.toLowerCase().includes(search)||t.assignedToName.toLowerCase().includes(search)||(t.class||'').toLowerCase().includes(search)||(t.subject||'').toLowerCase().includes(search));
-  if(fTeacher) tasks = tasks.filter(t=>t.assignedToName===fTeacher);
-  if(fClass) tasks = tasks.filter(t=>t.class===fClass);
-  if(fCategory) tasks = tasks.filter(t=>t.category===fCategory);
-  if(fStatus) tasks = tasks.filter(t=>t.status===fStatus);
-  if(fPriority) tasks = tasks.filter(t=>t.priority===fPriority);
-  tasks.sort((a,b)=>String(a.dueDate).localeCompare(String(b.dueDate)));
-
-  if(!tasks.length) return `<div class="card">${emptyState('📋','No tasks match these filters','Create a task to get started.')}</div>`;
-  return `<div class="card"><div style="overflow-x:auto"><table style="width:100%;font-size:12.5px">
-    <thead><tr><th>Task</th><th>Teacher</th><th>Category</th><th>Due Date</th><th>Priority</th><th>Status</th><th>Action</th></tr></thead>
-    <tbody>${tasks.map(t=>`<tr>
-      <td>${esc(t.title)}${t.class?`<br><span class="text-xs text-muted">${esc(t.class)} ${esc(t.subject||'')}</span>`:''}</td>
-      <td>${esc(t.assignedToName)}</td>
-      <td>${esc(t.category)}</td>
-      <td>${fmtDate(t.dueDate)}</td>
-      <td>${taskPriorityBadge(t.priority)}</td>
-      <td>${taskStatusBadge(t.status)}</td>
-      <td>
-        <div style="display:flex;gap:4px;flex-wrap:wrap">
-          <button class="btn btn-xs btn-outline" onclick="openTaskDetail('${t.id}')"><i class="fas fa-eye"></i></button>
-          ${(t.status==='Pending'||t.status==='In Progress'||t.status==='Overdue')?`<button class="btn btn-xs btn-outline" onclick="sendTaskReminder('${t.id}')"><i class="fab fa-whatsapp"></i></button>`:''}
-        </div>
-      </td>
-    </tr>`).join('')}</tbody>
-  </table></div></div>`;
-}
-
-function openTaskDetail(taskId){
-  const tasks = syncTaskStatuses();
-  const task = tasks.find(t=>t.id===taskId);
-  if(!task) return;
-  const isPrincipal = currentUser && currentUser.role==='principal';
-  const isOwner = currentUser && currentUser.role==='teacher' && (currentUser.id===task.assignedToId||currentUser.teacherId===task.assignedToId);
-  const readyForSubmit = !task.linkedMarksTask || task.status==='Ready' || task.status==='In Progress'&&false;
-  const canSubmit = isOwner && (task.status==='In Progress'||task.status==='Ready'||task.status==='Pending');
-  const marksBlocked = task.linkedMarksTask && task.status!=='Ready' && task.status!=='Submitted' && task.status!=='Completed';
-
-  openModal(`Task Details — ${esc(task.id)}`,`
-    <div style="margin-bottom:12px">
-      <div style="font-weight:900;font-size:15px;color:var(--primary)">${esc(task.title)}</div>
-      <div class="text-xs text-muted">Assigned By: ${esc(task.createdBy)} &bull; Assigned To: ${esc(task.assignedToName)}</div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;margin-bottom:12px">
-      <div><strong>Category:</strong> ${esc(task.category)}</div>
-      <div><strong>Priority:</strong> ${taskPriorityBadge(task.priority)}</div>
-      ${task.class?`<div><strong>Class:</strong> ${esc(task.class)}</div>`:''}
-      ${task.subject?`<div><strong>Subject:</strong> ${esc(task.subject)}</div>`:''}
-      <div><strong>Due Date:</strong> ${fmtDate(task.dueDate)}</div>
-      <div><strong>Status:</strong> ${taskStatusBadge(task.status)}</div>
-    </div>
-    ${task.description?`<div style="margin-bottom:12px;font-size:13px"><strong>Description:</strong> ${esc(task.description)}</div>`:''}
-    ${marksBlocked?`<div style="padding:8px 10px;background:#fef9c3;border-radius:8px;font-size:12px;color:#854d0e;margin-bottom:12px">⏳ This task is linked to Marks Entry — it can't be submitted until all marks are entered (currently ${taskStatusBadge(task.status)}).</div>`:''}
-    ${task.submissionNote?`<div style="padding:8px 10px;background:#f0fdf4;border-radius:8px;font-size:12px;margin-bottom:8px"><strong>Submission Note:</strong> ${esc(task.submissionNote)}${task.attachmentName?`<br><em>Attachment: ${esc(task.attachmentName)}</em>`:''}</div>`:''}
-    ${task.returnNote?`<div style="padding:8px 10px;background:#fef9c3;border-radius:8px;font-size:12px;margin-bottom:8px"><strong>Principal's Note:</strong> ${esc(task.returnNote)}</div>`:''}
-    ${task.reminderHistory?.length?`<div class="text-xs text-muted" style="margin-bottom:8px">Reminders sent: ${task.reminderHistory.map(r=>fmtDate(r.sentAt)).join(', ')}</div>`:''}
-  `,[
-    ...(canSubmit&&!marksBlocked?[{label:task.status==='Pending'?'<i class="fas fa-play"></i> Start Task':'<i class="fas fa-check"></i> Submit Task',cls:'btn-primary',onclick:task.status==='Pending'?`startTask('${task.id}')`:`openSubmitTaskModal('${task.id}')`}]:[]),
-    ...(isPrincipal&&task.status==='Submitted'?[{label:'<i class="fas fa-check-double"></i> Approve',cls:'btn-success',onclick:`approveTask('${task.id}')`},{label:'<i class="fas fa-undo"></i> Return',cls:'btn-outline',onclick:`openReturnTaskModal('${task.id}')`}]:[]),
-    ...(isPrincipal&&(task.status==='Pending'||task.status==='In Progress'||task.status==='Overdue')?[{label:'<i class="fab fa-whatsapp"></i> Send Reminder',cls:'btn-outline',onclick:`sendTaskReminder('${task.id}')`}]:[]),
-    ...(isPrincipal?[{label:'<i class="fas fa-trash"></i> Delete',cls:'btn-outline',onclick:`deleteTask('${task.id}')`}]:[]),
-    {label:'Close',cls:'btn-outline',onclick:'closeModal()'}
-  ]);
-}
-function startTask(taskId){
-  const tasks = getTasks();
-  const t = tasks.find(x=>x.id===taskId);
-  if(!t) return;
-  if(t.status==='Pending') t.status='In Progress';
-  saveTasks(tasks);
-  toast('Task started');
-  openTaskDetail(taskId);
-}
-function openSubmitTaskModal(taskId){
-  openModal('✅ Submit Task',`
-    <div class="form-group"><label>Submission Note</label><textarea id="stNote" rows="3" placeholder="e.g. Marks completed and submitted to school office." style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></textarea></div>
-    <div class="form-group"><label>Upload File (optional)</label><input type="file" id="stFile" accept=".xlsx,.xls,.pdf,.docx,.csv,.jpg,.png" style="width:100%"></div>
-  `,[{label:'<i class="fas fa-paper-plane"></i> Submit',cls:'btn-primary',onclick:`submitTask('${taskId}')`},{label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}]);
-}
-function submitTask(taskId){
-  const tasks = getTasks();
-  const t = tasks.find(x=>x.id===taskId);
-  if(!t) return;
-  const note = document.getElementById('stNote')?.value||'';
-  const fileInput = document.getElementById('stFile');
-  const fileName = fileInput?.files?.[0]?.name || '';
-  t.status='Submitted';
-  t.submittedAt=new Date().toISOString();
-  t.submissionNote=note;
-  t.attachmentName=fileName; // filename recorded for reference only — file content is not stored
-  saveTasks(tasks);
-  toast('✅ Task submitted — awaiting Principal review');
-  closeModal();
-  if(currentUser?.role==='teacher') showPage('dashboard'); else refreshTaskReportPage();
-}
-function approveTask(taskId){
-  const tasks = getTasks();
-  const t = tasks.find(x=>x.id===taskId);
-  if(!t) return;
-  t.status='Completed';
-  t.approvedBy=currentUser?.name||'Principal';
-  t.approvedAt=new Date().toISOString();
-  saveTasks(tasks);
-  toast('✅ Task marked Completed');
-  closeModal();
-  refreshTaskReportPage();
-}
-function openReturnTaskModal(taskId){
-  openModal('Return Task to Teacher',`
-    <div class="form-group"><label>Note for teacher</label><textarea id="rtNote" rows="3" placeholder="e.g. Please check Class 2 Roll 17 marks and resubmit." style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></textarea></div>
-  `,[{label:'<i class="fas fa-undo"></i> Return Task',cls:'btn-primary',onclick:`returnTask('${taskId}')`},{label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}]);
-}
-function returnTask(taskId){
-  const tasks = getTasks();
-  const t = tasks.find(x=>x.id===taskId);
-  if(!t) return;
-  t.status='Action Required';
-  t.returnNote=document.getElementById('rtNote')?.value||'';
-  saveTasks(tasks);
-  toast('Task returned to teacher');
-  closeModal();
-  refreshTaskReportPage();
-}
-function deleteTask(taskId){
-  if(!confirm('Delete this task? This cannot be undone.')) return;
-  saveTasks(getTasks().filter(t=>t.id!==taskId));
-  toast('Task deleted');
-  closeModal();
-  refreshTaskReportPage();
-}
-function sendTaskReminder(taskId){
-  const tasks = getTasks();
-  const t = tasks.find(x=>x.id===taskId);
-  if(!t) return;
-  const teacher = (ls('teachers')||[]).find(tc=>tc.id===t.assignedToId);
-  if(!requireTeacherPhone(teacher)) return;
-  const line = taskSmartLine(t.dueDate);
-  const msg=`Dear ${t.assignedToName},\n\nThis is a reminder from ${SCHOOL.name}.\n\nYour assigned task is still ${t.status.toLowerCase()}:\n\nTask:\n${t.title}\n${t.class?`\nClass:\n${t.class}\n`:''}${t.subject?`Subject:\n${t.subject}\n`:''}\nDue Date:\n${fmtDate(t.dueDate)}\n\n${line}\n\nThank you,\n${SCHOOL.name}`;
-  window.open(`https://wa.me/91${teacher.phone}?text=${encodeURIComponent(msg)}`,'_blank');
-  t.reminderHistory = t.reminderHistory||[];
-  t.reminderHistory.push({sentAt:new Date().toISOString(), sentBy:currentUser?.name||'Principal', method:'WhatsApp'});
-  saveTasks(tasks);
-}
-function openRemindAllPendingTasks(){
-  const tasks = syncTaskStatuses();
-  const pending = tasks.filter(t=>t.status==='Pending'||t.status==='In Progress'||t.status==='Overdue');
-  if(!pending.length){ toast('No pending tasks — all caught up! 🎉'); return; }
-  const byTeacher = {};
-  pending.forEach(t=>{ (byTeacher[t.assignedToName]=byTeacher[t.assignedToName]||[]).push(t); });
-  openModal(`Remind All Pending (${pending.length})`,`
-    <div class="text-sm text-muted" style="margin-bottom:10px">Opens one WhatsApp conversation per teacher, one at a time.</div>
-    ${Object.entries(byTeacher).map(([name,items])=>`
-      <div style="padding:8px 10px;background:#f8faff;border-radius:8px;margin-bottom:6px;font-size:12.5px">
-        <strong>${esc(name)}</strong> — ${items.length} ${items.some(i=>i.status==='Overdue')?'overdue':'pending'}
-      </div>`).join('')}
-  `,[{label:'<i class="fab fa-whatsapp"></i> Send WhatsApp Reminder',cls:'btn-success',onclick:'tkRemindAllSequential()'},{label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}],'modal-lg');
-}
-function tkRemindAllSequential(){
-  const tasks = syncTaskStatuses();
-  const pending = tasks.filter(t=>t.status==='Pending'||t.status==='In Progress'||t.status==='Overdue');
-  closeModal();
-  let i=0;
-  function next(){
-    if(i>=pending.length){ toast(`Opened WhatsApp for ${pending.length} task reminder(s)`); return; }
-    sendTaskReminder(pending[i].id);
-    i++;
-    setTimeout(next, 600);
-  }
-  next();
-}
-
-function printTaskReport(){
-  const tasks = syncTaskStatuses();
-  const c = taskCounts(tasks);
-  const byTeacher = {};
-  tasks.forEach(t=>{ (byTeacher[t.assignedToName]=byTeacher[t.assignedToName]||[]).push(t); });
-  const rate = c.total?Math.round(c.completed/c.total*100):0;
-  let body = schoolHeaderHTML('Task Performance Report');
-  body += `<div style="margin:14px 0;font-size:13px">
-    <div><strong>Total Tasks:</strong> ${c.total}</div>
-    <div><strong>Completed:</strong> ${c.completed}</div>
-    <div><strong>Pending:</strong> ${c.pending}</div>
-    <div><strong>Overdue:</strong> ${c.overdue}</div>
-    <div><strong>Completion Rate:</strong> ${rate}%</div>
-  </div>`;
-  body += `<h3>Teacher-wise</h3><table style="width:100%;border-collapse:collapse;font-size:11.5px" border="1">
-    <thead><tr><th>Teacher</th><th>Assigned</th><th>Completed</th><th>Pending</th><th>Overdue</th><th>Completion</th></tr></thead>
-    <tbody>${Object.entries(byTeacher).map(([name,items])=>{
-      const tc = taskCounts(items);
-      const r = tc.total?Math.round(tc.completed/tc.total*100):0;
-      return `<tr><td>${esc(name)}</td><td>${tc.total}</td><td>${tc.completed}</td><td>${tc.pending}</td><td>${tc.overdue}</td><td>${r}%</td></tr>`;
-    }).join('')}</tbody>
-  </table>`;
-  body += `<h3 style="margin-top:16px">All Tasks</h3><table style="width:100%;border-collapse:collapse;font-size:11px" border="1">
-    <thead><tr><th>Teacher</th><th>Task</th><th>Category</th><th>Due Date</th><th>Status</th><th>Completed</th></tr></thead>
-    <tbody>${tasks.map(t=>`<tr><td>${esc(t.assignedToName)}</td><td>${esc(t.title)}</td><td>${esc(t.category)}</td><td>${fmtDate(t.dueDate)}</td><td>${esc(t.status)}</td><td>${t.approvedAt?fmtDate(t.approvedAt):'—'}</td></tr>`).join('')}</tbody>
-  </table>`;
-  printWindow('Task Performance Report', body);
-}
-
-// ── Teacher Dashboard integration ──
-function renderMyTasksPanel(teacherId, teacherName){
-  const tasks = syncTaskStatuses().filter(t=>t.assignedToId===teacherId);
-  if(!tasks.length) return '';
-  const pending = tasks.filter(t=>t.status==='Pending'||t.status==='In Progress').length;
-  const overdue = tasks.filter(t=>t.status==='Overdue').length;
-  const dueToday = tasks.filter(t=>t.dueDate===today()).length;
-  let alertLine = '';
-  if(overdue) alertLine = `🚨 You have ${overdue} overdue task${overdue!==1?'s':''}.`;
-  else if(dueToday) alertLine = `⚠️ You have a task due today.`;
-  else if(pending) alertLine = `🔔 You have ${pending} pending task${pending!==1?'s':''}.`;
-  return `
-  <div class="card" style="margin-top:20px">
-    <div class="card-title"><i class="fas fa-tasks"></i> My Tasks ${alertLine?`<span class="text-xs" style="font-weight:600;color:#b91c1c;margin-left:8px">${alertLine}</span>`:''}</div>
-    ${tasks.sort((a,b)=>String(a.dueDate).localeCompare(String(b.dueDate))).map(t=>`
-      <div style="padding:9px 10px;background:#f8faff;border-radius:8px;margin-bottom:7px;cursor:pointer" onclick="openTaskDetail('${t.id}')">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
-          <span style="font-weight:700;font-size:12.5px">${esc(t.title)}${t.class?` — ${esc(t.class)}`:''}</span>
-          ${taskStatusBadge(t.status)}
-        </div>
-        <div class="text-xs text-muted" style="margin-top:2px">Due: ${fmtDate(t.dueDate)}</div>
-      </div>`).join('')}
-  </div>`;
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-//  EXAM PLANNER + AUTOMATIC REMINDER SYSTEM
-// ═══════════════════════════════════════════════════════════════════════
-function getExamPlans(){ return ls('examPlans')||{}; }
-function getExamPlan(session, term){
-  const plans = getExamPlans();
-  return (plans[session]||{})[term] || null;
-}
-function saveExamPlan(session, term, plan){
-  const plans = getExamPlans();
-  if(!plans[session]) plans[session]={};
-  plans[session][term] = Object.assign({
-    reminderSettings:{
-      questionPaper:{d15:true,d7:true,d3:true,d1:true},
-      marksEntry:{d7:true,d3:true,d1:true,deadline:true,overdue:true},
-      reportDay:{d15:true,d7:true,d3:true,d1:true}
-    }
-  }, plans[session]?.[term]||{}, plan);
-  ss('examPlans', plans);
-  return plans[session][term];
-}
-function daysUntilDate(dateStr){
-  if(!dateStr) return null;
-  const todayMs = new Date(today()+'T00:00:00').getTime();
-  const dMs = new Date(dateStr+'T00:00:00').getTime();
-  return Math.round((dMs-todayMs)/86400000);
-}
-const TERM_LABELS = {'1':'Term 1','2':'Term 2','3':'Term 3'};
-
-// Extend the Task Manager's status badges with the Question Paper workflow states.
-function examStatusBadge(status){
-  const map={
-    'Not Started':['🔴 Not Started','#fee2e2','#b91c1c'],
-    'In Progress':['🟡 In Progress','#fef9c3','#a16207'],
-    'Submitted':['🟢 Submitted','#dcfce7','#166534'],
-    'Office Received':['🔵 Office Received','#dbeafe','#1d4ed8'],
-    'Approved':['🟢 Approved','#dcfce7','#166534'],
-    'Revision Required':['🟠 Revision Required','#ffedd5','#c2410c'],
-  };
-  if(map[status]) { const [label,bg,color]=map[status]; return `<span class="badge" style="padding:5px 10px;border-radius:20px;font-size:12px;font-weight:700;display:inline-block;white-space:nowrap;background:${bg};color:${color}">${label}</span>`; }
-  return taskStatusBadge(status); // falls back to the regular Task Manager badges (Pending/In Progress/Ready/Overdue...)
-}
-
-// ── Auto-generate Question Paper, Marks Entry, and Report Card tasks from the exam plan ──
-function generateExamTasks(session, term){
-  const plan = getExamPlan(session, term);
-  if(!plan || !plan.examStart) { toast('Set the exam dates first','error'); return; }
-  const teachers = ls('teachers')||[];
-  const termLabel = TERM_LABELS[term];
-  const qpDue = plan.examStart ? new Date(new Date(plan.examStart+'T00:00:00').getTime()-10*86400000).toISOString().split('T')[0] : '';
-  let created=0, linked=0;
-
-  // Question Paper tasks — one per teacher's class+subject assignment
-  teachers.forEach(t=>{
-    (t.teachAssignments||[]).forEach(a=>{
-      const key = `QP-${session}-T${term}-${a.class}-${a.subject}`.replace(/\s+/g,'_');
-      const tasks = getTasks();
-      const existing = tasks.find(x=>x.examTaskKey===key);
-      if(existing){
-        existing.dueDate = qpDue||existing.dueDate;
-        saveTasks(tasks);
-      } else {
-        createTask({
-          title:`Prepare ${a.class} ${a.subject} ${termLabel} Question Paper`,
-          category:'Question Paper', assignedToId:t.id, assignedToName:t.name,
-          class:a.class, subject:a.subject, priority:'High',
-          description:`Prepare the ${termLabel} question paper for ${a.class} ${a.subject} and submit it to the school office.`,
-          dueDate: qpDue, status:'Not Started',
-          examTaskKey:key, session, term
-        });
-        created++;
-      }
-    });
-  });
-
-  // Marks Entry tasks — reuse the existing marks-linked task engine (already dedupes)
-  teachers.forEach(t=>{
-    (t.teachAssignments||[]).forEach(a=>{
-      createOrLinkMarksTask(t.id, t.name, a.class, a.subject, term, plan.marksDeadline||'');
-      linked++;
-    });
-  });
-
-  // Report Card tasks — one per class, assigned to that class's teacher(s)
-  if(plan.reportDay){
-    getAllClasses().forEach(cls=>{
-      const classTeachers = findClassTeachers(cls);
-      classTeachers.forEach(t=>{
-        const key = `RC-${session}-T${term}-${cls}`.replace(/\s+/g,'_');
-        const tasks = getTasks();
-        const existing = tasks.find(x=>x.examTaskKey===key);
-        if(existing){ existing.dueDate = plan.reportDay; saveTasks(tasks); }
-        else {
-          createTask({
-            title:`Prepare ${termLabel} Report Cards — ${cls}`,
-            category:'Report', assignedToId:t.id, assignedToName:t.name,
-            class:cls, subject:'', priority:'Medium',
-            description:`Verify marks, add remarks, and prepare ${termLabel} report cards for ${cls}.`,
-            dueDate: plan.reportDay, status:'Pending',
-            examTaskKey:key, session, term
-          });
-          created++;
-        }
-      });
-    });
-  }
-
-  // Sync exam dates into the Academic Calendar (dedupe by deterministic id)
-  syncExamDatesToCalendar(session, term, plan);
-
-  toast(`✅ Exam tasks ready — ${created} new task(s), ${linked} marks-entry task(s) checked`);
-}
-
-function syncExamDatesToCalendar(session, term, plan){
-  const calendar = ls('calendar')||[];
-  const termLabel = TERM_LABELS[term];
-  const entries = [
-    plan.examStart && {id:`exam_${session}_T${term}_start`, title:`${termLabel} Examination Starts`, date:plan.examStart, category:'Exam', reminderDays:7},
-    plan.examEnd && {id:`exam_${session}_T${term}_end`, title:`${termLabel} Examination Ends`, date:plan.examEnd, category:'Exam', reminderDays:3},
-    plan.marksDeadline && {id:`exam_${session}_T${term}_marksdl`, title:`${termLabel} Marks Entry Deadline`, date:plan.marksDeadline, category:'Result', reminderDays:3},
-    plan.reportDay && {id:`exam_${session}_T${term}_report`, title:`${termLabel} Report Day`, date:plan.reportDay, category:'Result', reminderDays:7},
-  ].filter(Boolean);
-  entries.forEach(entry=>{
-    const idx = calendar.findIndex(e=>e.id===entry.id);
-    if(idx>=0) calendar[idx]=Object.assign(calendar[idx], entry);
-    else calendar.push(entry);
-  });
-  ss('calendar', calendar);
-}
-
-// ── Smart reminder message text, per spec's day-tiers, for each of the 3 reminder types ──
-function examSmartLine(kind, days){
-  if(days===null||days===undefined) return '';
-  if(kind==='questionPaper'){
-    if(days<0) return 'This question paper submission is overdue. Please submit it to the school office immediately.';
-    if(days===0) return 'The question paper is due TODAY.';
-    if(days===1) return 'The question paper deadline is tomorrow.';
-    if(days<=3) return `Only ${days} days remain — please submit the question paper as soon as possible.`;
-    if(days<=7) return `${days} days remain before the exam. Please submit the question paper soon.`;
-    return `${days} days remain before the exam starts.`;
-  }
-  if(kind==='marksEntry'){
-    if(days<0) return 'Marks entry is OVERDUE.';
-    if(days===0) return 'Marks entry is due TODAY.';
-    if(days===1) return 'Marks entry deadline is tomorrow.';
-    if(days<=3) return `Marks entry deadline is ${days} days away.`;
-    return `Marks entry deadline is ${days} days away.`;
-  }
-  if(kind==='reportDay'){
-    if(days<0) return 'Report Day has passed.';
-    if(days===0) return 'Report Day is TODAY.';
-    if(days===1) return 'Report Day is tomorrow.';
-    if(days<=15) return `${days} days until Report Day.`;
-    return `${days} days until Report Day.`;
-  }
-  return '';
-}
-
-function sendExamReminder(taskId){
-  const tasks = getTasks();
-  const t = tasks.find(x=>x.id===taskId);
-  if(!t) return;
-  const teacher = (ls('teachers')||[]).find(tc=>tc.id===t.assignedToId);
-  if(!requireTeacherPhone(teacher)) return;
-  const plan = getExamPlan(t.session, t.term) || {};
-  const termLabel = TERM_LABELS[t.term]||'';
-  let msg;
-  if(t.category==='Question Paper'){
-    const days = daysUntilDate(plan.examStart);
-    msg=`Dear ${t.assignedToName},\n\n⚠️ Exam Reminder\n\nThe ${termLabel} Examination is approaching.\n\nPlease prepare and submit:\n\nClass:\n${t.class}\n\nSubject:\n${t.subject}\n\nQuestion Paper:\n${termLabel} Examination ${t.session}\n\nExam Start:\n${fmtDate(plan.examStart)}\n\n${examSmartLine('questionPaper',days)}\n\nPlease submit the question paper to the school office as soon as possible.\n\nThank you,\n${SCHOOL.name}`;
-  } else if(t.category==='Marks Entry'){
-    const days = daysUntilDate(plan.marksDeadline);
-    msg=`Dear ${t.assignedToName},\n\n📝 Marks Entry Reminder\n\nThe ${termLabel} Examination has been completed.\n\nPlease complete and submit the marks for:\n\nClass:\n${t.class}\n\nSubject:\n${t.subject}\n\nMarks Submission Deadline:\n${fmtDate(plan.marksDeadline)}\n\n${examSmartLine('marksEntry',days)}\n\nPlease complete the marks entry and submit it to the school office as soon as possible.\n\nThank you,\n${SCHOOL.name}`;
-  } else {
-    const days = daysUntilDate(plan.reportDay);
-    msg=`Dear ${t.assignedToName},\n\n📊 Report Day Reminder\n\n${termLabel} Report Day is approaching.\n\nReport Day:\n${fmtDate(plan.reportDay)}\n\n${examSmartLine('reportDay',days)}\n\nPlease ensure that all marks, remarks and report-card related work are completed and submitted to the school office.\n\nThank you,\n${SCHOOL.name}`;
-  }
-  window.open(`https://wa.me/91${teacher.phone}?text=${encodeURIComponent(msg)}`,'_blank');
-  t.reminderHistory = t.reminderHistory||[];
-  t.reminderHistory.push({sentAt:new Date().toISOString(), sentBy:currentUser?.name||'Principal', method:'WhatsApp'});
-  saveTasks(tasks);
-}
-
-// ── Question Paper workflow actions (separate from the generic Task Manager flow) ──
-function submitQuestionPaper(taskId){
-  const tasks = getTasks();
-  const t = tasks.find(x=>x.id===taskId);
-  if(!t) return;
-  const note = document.getElementById('qpNote')?.value||'';
-  const fileInput = document.getElementById('qpFile');
-  const fileName = fileInput?.files?.[0]?.name || '';
-  t.status='Submitted';
-  t.submittedAt=new Date().toISOString();
-  t.submissionNote=note;
-  t.attachmentName=fileName; // filename recorded for reference only — file content is not stored
-  saveTasks(tasks);
-  toast('✅ Question paper submitted — awaiting office receipt');
-  closeModal();
-  if(currentUser?.role==='teacher') showPage('dashboard'); else refreshExamPlannerPage();
-}
-function markOfficeReceived(taskId){
-  const tasks = getTasks();
-  const t = tasks.find(x=>x.id===taskId);
-  if(!t) return;
-  t.status='Office Received';
-  saveTasks(tasks);
-  toast('🔵 Marked as received by office');
-  refreshExamPlannerPage();
-}
-function approveQuestionPaper(taskId){
-  const tasks = getTasks();
-  const t = tasks.find(x=>x.id===taskId);
-  if(!t) return;
-  t.status='Approved';
-  t.approvedBy=currentUser?.name||'Principal';
-  t.approvedAt=new Date().toISOString();
-  saveTasks(tasks);
-  toast('✅ Question paper approved');
-  closeModal();
-  refreshExamPlannerPage();
-}
-function returnQPForRevision(taskId){
-  const note = prompt('Note for teacher (what needs revising):');
-  if(note===null) return;
-  const tasks = getTasks();
-  const t = tasks.find(x=>x.id===taskId);
-  if(!t) return;
-  t.status='Revision Required';
-  t.returnNote=note;
-  saveTasks(tasks);
-  toast('Returned to teacher for revision');
-  closeModal();
-  refreshExamPlannerPage();
-}
-function openQuestionPaperDetail(taskId){
-  const tasks = getTasks();
-  const t = tasks.find(x=>x.id===taskId);
-  if(!t) return;
-  const isPrincipal = currentUser && currentUser.role==='principal';
-  const isOwner = currentUser && currentUser.role==='teacher' && (currentUser.id===t.assignedToId||currentUser.teacherId===t.assignedToId);
-  openModal(`Question Paper — ${esc(t.class)} ${esc(t.subject)}`,`
-    <div style="margin-bottom:10px;font-size:13px">
-      <div><strong>Teacher:</strong> ${esc(t.assignedToName)}</div>
-      <div><strong>Due:</strong> ${fmtDate(t.dueDate)}</div>
-      <div><strong>Status:</strong> ${examStatusBadge(t.status)}</div>
-    </div>
-    ${t.returnNote?`<div style="padding:8px 10px;background:#ffedd5;border-radius:8px;font-size:12px;margin-bottom:10px"><strong>Revision Note:</strong> ${esc(t.returnNote)}</div>`:''}
-    ${t.submissionNote?`<div style="padding:8px 10px;background:#f0fdf4;border-radius:8px;font-size:12px;margin-bottom:10px"><strong>Submission Note:</strong> ${esc(t.submissionNote)}${t.attachmentName?`<br><em>File: ${esc(t.attachmentName)}</em>`:''}</div>`:''}
-    ${isOwner&&(t.status==='Not Started'||t.status==='In Progress'||t.status==='Revision Required')?`
-      <div class="form-group"><label>Submission Note</label><textarea id="qpNote" rows="3" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></textarea></div>
-      <div class="form-group"><label>Upload File (PDF/DOC/DOCX)</label><input type="file" id="qpFile" accept=".pdf,.doc,.docx" style="width:100%"></div>
-    `:''}
-  `,[
-    ...(isOwner&&t.status==='Not Started'?[{label:'<i class="fas fa-play"></i> Start Task',cls:'btn-primary',onclick:`(function(){const ts=getTasks();const tt=ts.find(x=>x.id==='${taskId}');tt.status='In Progress';saveTasks(ts);openQuestionPaperDetail('${taskId}');})()`}]:[]),
-    ...(isOwner&&(t.status==='In Progress'||t.status==='Revision Required')?[{label:'<i class="fas fa-paper-plane"></i> Submit Question Paper',cls:'btn-primary',onclick:`submitQuestionPaper('${taskId}')`}]:[]),
-    ...(isPrincipal&&t.status==='Submitted'?[{label:'<i class="fas fa-inbox"></i> Mark Office Received',cls:'btn-outline',onclick:`markOfficeReceived('${taskId}')`}]:[]),
-    ...(isPrincipal&&t.status==='Office Received'?[{label:'<i class="fas fa-check-double"></i> Approve',cls:'btn-success',onclick:`approveQuestionPaper('${taskId}')`},{label:'<i class="fas fa-undo"></i> Return',cls:'btn-outline',onclick:`returnQPForRevision('${taskId}')`}]:[]),
-    {label:'Close',cls:'btn-outline',onclick:'closeModal()'}
-  ]);
-}
-
-function openExamPlannerSettings(term){
-  const session = getActiveSession();
-  const plan = getExamPlan(session, term)||{};
-  const rs = plan.reminderSettings||{questionPaper:{},marksEntry:{},reportDay:{}};
-  openModal(`${TERM_LABELS[term]} — Exam Settings`,`
-    <div class="form-row">
-      <div class="form-group"><label>Exam Start Date</label><input id="epStart" type="date" value="${plan.examStart||''}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
-      <div class="form-group"><label>Exam End Date</label><input id="epEnd" type="date" value="${plan.examEnd||''}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Marks Entry Deadline</label><input id="epMarksDl" type="date" value="${plan.marksDeadline||''}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
-      <div class="form-group"><label>Report Card / Result Date</label><input id="epReport" type="date" value="${plan.reportDay||''}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
-    </div>
-    <div style="font-weight:800;font-size:12.5px;margin:12px 0 6px">Reminder Timing</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:12px">
-      <div>
-        <div style="font-weight:700;margin-bottom:4px">Question Paper</div>
-        <label style="display:block"><input type="checkbox" id="epQp15" ${rs.questionPaper?.d15!==false?'checked':''}> 15 days before</label>
-        <label style="display:block"><input type="checkbox" id="epQp7" ${rs.questionPaper?.d7!==false?'checked':''}> 7 days before</label>
-        <label style="display:block"><input type="checkbox" id="epQp3" ${rs.questionPaper?.d3!==false?'checked':''}> 3 days before</label>
-        <label style="display:block"><input type="checkbox" id="epQp1" ${rs.questionPaper?.d1!==false?'checked':''}> 1 day before</label>
-      </div>
-      <div>
-        <div style="font-weight:700;margin-bottom:4px">Marks Entry</div>
-        <label style="display:block"><input type="checkbox" id="epMe7" ${rs.marksEntry?.d7!==false?'checked':''}> 7 days before</label>
-        <label style="display:block"><input type="checkbox" id="epMe3" ${rs.marksEntry?.d3!==false?'checked':''}> 3 days before</label>
-        <label style="display:block"><input type="checkbox" id="epMe1" ${rs.marksEntry?.d1!==false?'checked':''}> 1 day before</label>
-        <label style="display:block"><input type="checkbox" id="epMeDl" ${rs.marksEntry?.deadline!==false?'checked':''}> On deadline</label>
-        <label style="display:block"><input type="checkbox" id="epMeOd" ${rs.marksEntry?.overdue!==false?'checked':''}> After deadline</label>
-      </div>
-      <div>
-        <div style="font-weight:700;margin-bottom:4px">Report Day</div>
-        <label style="display:block"><input type="checkbox" id="epRd15" ${rs.reportDay?.d15!==false?'checked':''}> 15 days before</label>
-        <label style="display:block"><input type="checkbox" id="epRd7" ${rs.reportDay?.d7!==false?'checked':''}> 7 days before</label>
-        <label style="display:block"><input type="checkbox" id="epRd3" ${rs.reportDay?.d3!==false?'checked':''}> 3 days before</label>
-        <label style="display:block"><input type="checkbox" id="epRd1" ${rs.reportDay?.d1!==false?'checked':''}> 1 day before</label>
-      </div>
-    </div>
-  `,[{label:'<i class="fas fa-save"></i> Save & Generate Tasks',cls:'btn-primary',onclick:`saveExamPlannerSettings('${term}')`},{label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}],'modal-lg');
-}
-function saveExamPlannerSettings(term){
-  const session = getActiveSession();
-  saveExamPlan(session, term, {
-    examStart:document.getElementById('epStart').value,
-    examEnd:document.getElementById('epEnd').value,
-    marksDeadline:document.getElementById('epMarksDl').value,
-    reportDay:document.getElementById('epReport').value,
-    reminderSettings:{
-      questionPaper:{d15:document.getElementById('epQp15').checked,d7:document.getElementById('epQp7').checked,d3:document.getElementById('epQp3').checked,d1:document.getElementById('epQp1').checked},
-      marksEntry:{d7:document.getElementById('epMe7').checked,d3:document.getElementById('epMe3').checked,d1:document.getElementById('epMe1').checked,deadline:document.getElementById('epMeDl').checked,overdue:document.getElementById('epMeOd').checked},
-      reportDay:{d15:document.getElementById('epRd15').checked,d7:document.getElementById('epRd7').checked,d3:document.getElementById('epRd3').checked,d1:document.getElementById('epRd1').checked},
-    }
-  });
-  generateExamTasks(session, term);
-  closeModal();
-  refreshExamPlannerPage();
-}
-
-function getExamTasksFor(session, term){
-  return syncTaskStatuses().filter(t=>t.session===session && t.term===term && t.examTaskKey);
-}
-function examTaskCounts(tasks, category){
-  const list = tasks.filter(t=>t.category===category);
-  return {
-    total:list.length,
-    green:list.filter(t=>['Approved','Completed','Ready','Submitted'].includes(t.status)).length,
-    yellow:list.filter(t=>['In Progress','Pending','Office Received','Revision Required'].includes(t.status)).length,
-    red:list.filter(t=>['Not Started','Overdue'].includes(t.status)).length,
-  };
-}
-
-function renderExamPlanner(){
-  const session = getActiveSession();
-  const activeTerm = window._epActiveTerm || '1';
-  return `
-  <div class="section-header">
-    <div class="section-title"><i class="fas fa-calendar-alt" style="color:var(--gold)"></i> Exam Planner</div>
-    <button class="btn btn-outline btn-sm" onclick="printExamTaskReport()"><i class="fas fa-print"></i> Print Exam Task Report</button>
-  </div>
-  <div class="tabs" style="margin-bottom:14px">
-    ${['1','2','3'].map(tm=>`<button class="tab ${tm===activeTerm?'active':''}" onclick="window._epActiveTerm='${tm}';refreshExamPlannerPage()">${TERM_LABELS[tm]}</button>`).join('')}
-  </div>
-  <div id="examPlannerBody">${renderExamPlannerTermBody(session, activeTerm)}</div>`;
-}
-function refreshExamPlannerPage(){
-  if(document.getElementById('examPlannerBody')) renderPage('examPlanner');
-}
-function renderExamPlannerTermBody(session, term){
-  const plan = getExamPlan(session, term);
-  if(!plan || !plan.examStart){
-    return `<div class="card">${emptyState('📅','No exam dates set for '+TERM_LABELS[term], 'Set the exam start/end, marks deadline, and report day to auto-generate all tasks and reminders.')}
-      <div style="text-align:center"><button class="btn btn-primary" onclick="openExamPlannerSettings('${term}')"><i class="fas fa-cog"></i> Set Exam Dates</button></div>
-    </div>`;
-  }
-  const tasks = getExamTasksFor(session, term);
-  const qp = examTaskCounts(tasks, 'Question Paper');
-  const me = examTaskCounts(tasks, 'Marks Entry');
-  const rc = examTaskCounts(tasks, 'Report');
-  const startDays = daysUntilDate(plan.examStart);
-
-  const upcoming = [];
-  tasks.filter(t=>t.status!=='Approved'&&t.status!=='Completed'&&t.status!=='Ready').forEach(t=>{
-    const d = daysUntilDate(t.dueDate);
-    if(d!==null && d>=0 && d<=15) upcoming.push({days:d, text:`${esc(t.assignedToName)} — ${esc(t.title)}`});
-  });
-  upcoming.sort((a,b)=>a.days-b.days);
-
-  return `
-  <div class="card" style="margin-bottom:16px">
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-      <div style="font-size:13px;line-height:1.8">
-        <div><strong>Exam Start:</strong> ${fmtDate(plan.examStart)} ${startDays>=0?`<span class="text-muted">(in ${startDays} days)</span>`:''}</div>
-        <div><strong>Exam End:</strong> ${fmtDate(plan.examEnd)}</div>
-        <div><strong>Marks Deadline:</strong> ${fmtDate(plan.marksDeadline)}</div>
-        <div><strong>Report Day:</strong> ${fmtDate(plan.reportDay)}</div>
-      </div>
-      <button class="btn btn-outline btn-sm" onclick="openExamPlannerSettings('${term}')"><i class="fas fa-edit"></i> Edit Dates</button>
-    </div>
-  </div>
-
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:16px">
-    <div class="card">
-      <div class="card-title">📄 Question Papers</div>
-      <div style="font-size:12.5px;line-height:1.9">
-        <div>🟢 Submitted/Approved: ${qp.green}</div>
-        <div>🟡 In Progress: ${qp.yellow}</div>
-        <div>🔴 Not Started: ${qp.red}</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">📝 Marks Entry</div>
-      <div style="font-size:12.5px;line-height:1.9">
-        <div>🟢 Completed: ${me.green}</div>
-        <div>🟡 Pending/Partial: ${me.yellow}</div>
-        <div>🔴 Not Started: ${me.red}</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">📊 Report Card</div>
-      <div style="font-size:12.5px;line-height:1.9">
-        <div>🟢 Completed: ${rc.green}</div>
-        <div>🟡 Pending: ${rc.yellow+rc.red}</div>
-      </div>
-    </div>
-  </div>
-
-  ${upcoming.length?`
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-title"><i class="fas fa-bell"></i> Upcoming Academic Reminders</div>
-    ${upcoming.slice(0,8).map(u=>`<div style="padding:7px 10px;background:#f8faff;border-radius:8px;margin-bottom:5px;font-size:12.5px">${u.days===0?'<strong>Today</strong>':u.days===1?'<strong>Tomorrow</strong>':'In '+u.days+' days'}: ${u.text}</div>`).join('')}
-  </div>`:''}
-
-  <div class="card">
-    <div class="card-title"><i class="fas fa-list"></i> Exam Task List</div>
-    <div style="overflow-x:auto"><table style="width:100%;font-size:12.5px">
-      <thead><tr><th>Task</th><th>Teacher</th><th>Class</th><th>Subject</th><th>Due Date</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody>${tasks.sort((a,b)=>String(a.dueDate).localeCompare(String(b.dueDate))).map(t=>`<tr>
-        <td>${esc(t.category)}</td>
-        <td>${esc(t.assignedToName)}</td>
-        <td>${esc(t.class||'—')}</td>
-        <td>${esc(t.subject||'—')}</td>
-        <td>${fmtDate(t.dueDate)}</td>
-        <td>${examStatusBadge(t.status)}</td>
-        <td>
-          <div style="display:flex;gap:4px;flex-wrap:wrap">
-            <button class="btn btn-xs btn-outline" onclick="${t.category==='Question Paper'?`openQuestionPaperDetail('${t.id}')`:`openTaskDetail('${t.id}')`}"><i class="fas fa-eye"></i></button>
-            ${!['Approved','Completed','Ready'].includes(t.status)?`<button class="btn btn-xs btn-outline" onclick="sendExamReminder('${t.id}')"><i class="fab fa-whatsapp"></i> Remind</button>`:''}
-          </div>
-        </td>
-      </tr>`).join('')}</tbody>
-    </table></div>
-  </div>`;
-}
-
-function printExamTaskReport(){
-  const session = getActiveSession();
-  const term = window._epActiveTerm || '1';
-  const plan = getExamPlan(session, term)||{};
-  const tasks = getExamTasksFor(session, term);
-  const byTeacher = {};
-  tasks.forEach(t=>{ (byTeacher[t.assignedToName]=byTeacher[t.assignedToName]||[]).push(t); });
-  let body = schoolHeaderHTML('Exam Task Report');
-  body += `<div style="margin:14px 0;font-size:13px">
-    <div><strong>Session:</strong> ${esc(session)} &nbsp; <strong>Term:</strong> ${TERM_LABELS[term]}</div>
-    <div><strong>Exam:</strong> ${fmtDate(plan.examStart)} – ${fmtDate(plan.examEnd)} &nbsp; <strong>Marks Deadline:</strong> ${fmtDate(plan.marksDeadline)} &nbsp; <strong>Report Day:</strong> ${fmtDate(plan.reportDay)}</div>
-  </div>`;
-  body += `<table style="width:100%;border-collapse:collapse;font-size:11px" border="1">
-    <thead><tr><th>Teacher</th><th>Task</th><th>Class</th><th>Subject</th><th>Due Date</th><th>Status</th></tr></thead>
-    <tbody>${Object.entries(byTeacher).map(([name,items])=>items.map(t=>`<tr><td>${esc(name)}</td><td>${esc(t.category)}</td><td>${esc(t.class||'—')}</td><td>${esc(t.subject||'—')}</td><td>${fmtDate(t.dueDate)}</td><td>${esc(t.status)}</td></tr>`).join('')).join('')}</tbody>
-  </table>`;
-  printWindow('Exam Task Report', body);
-}
-
-// ── School Today integration ──
-function renderExamAlertsCard(){
-  const session = getActiveSession();
-  const terms = ['1','2','3'].map(term=>({term, plan:getExamPlan(session,term)})).filter(x=>x.plan&&x.plan.examStart);
-  if(!terms.length) return '';
-  // Show the nearest upcoming/active term
-  const now = terms.map(x=>({...x, startDays:daysUntilDate(x.plan.examStart), reportDays:daysUntilDate(x.plan.reportDay)}))
-    .filter(x=>x.reportDays===null||x.reportDays>=-3)
-    .sort((a,b)=>Math.abs(a.startDays)-Math.abs(b.startDays));
-  if(!now.length) return '';
-  const x = now[0];
-  const tasks = getExamTasksFor(session, x.term);
-  const qp = examTaskCounts(tasks, 'Question Paper');
-  const me = examTaskCounts(tasks, 'Marks Entry');
-  const qpDeadlineDays = daysUntilDate(x.plan.examStart ? new Date(new Date(x.plan.examStart+'T00:00:00').getTime()-10*86400000).toISOString().split('T')[0] : null);
-  return `<div class="card" style="margin-bottom:16px;cursor:pointer" onclick="showPage('examPlanner')">
-    <div class="card-title"><i class="fas fa-calendar-alt"></i> Exam Alerts — ${TERM_LABELS[x.term]}</div>
-    <div style="font-size:12.5px;line-height:1.9">
-      <div>Starts in: <strong>${x.startDays>=0?x.startDays+' days':'started'}</strong></div>
-      ${qpDeadlineDays!==null?`<div>Question Paper Deadline: <strong>${qpDeadlineDays>=0?qpDeadlineDays+' days remaining':'passed'}</strong></div>`:''}
-      <div>Pending Question Papers: <strong>${qp.red+qp.yellow}</strong></div>
-      <div>Marks Entry: <strong>${me.green===0?'Not Started':me.red+me.yellow>0?'In Progress':'Complete'}</strong></div>
-      <div>Report Day: <strong>${x.reportDays>=0?x.reportDays+' days remaining':'—'}</strong></div>
-    </div>
-    <button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="event.stopPropagation();showPage('examPlanner')"><i class="fas fa-arrow-right"></i> Open Exam Planner</button>
-  </div>`;
 }
 
 function renderAdminDashboard(){
@@ -3309,6 +2549,17 @@ function renderAdminDashboard(){
     <div class="card-title"><i class="fas fa-broadcast-tower" style="color:#dc2626"></i> Live Class Now</div>
     <div id="liveClassBody">${renderLiveClassCard()}</div>
   </div>
+
+  ${(()=>{const gStats=computeGovStats(sessStudents);return `
+  <div class="card" style="margin-bottom:20px;border-left:4px solid #c9a84c;cursor:pointer" onclick="showPage('govDashboard')">
+    <div class="card-title"><i class="fas fa-landmark" style="color:#c9a84c"></i> 🏛 Government Records</div>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;font-size:13px;font-weight:700">
+      <span>ID Completed: <b style="color:#15803d">${gStats.ID_CREATED+gStats.VERIFIED}</b></span>
+      <span>Pending: <b style="color:#a16207">${gStats.ID_PENDING+gStats.NOT_SUBMITTED+gStats.FORM_SUBMITTED}</b></span>
+      <span>TC Required: <b style="color:var(--primary)">${gStats.TC_REQUIRED}</b></span>
+      <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();showPage('govDashboard')" style="margin-left:auto">View Government Records</button>
+    </div>
+  </div>`;})()}
 
   <div class="stats-grid">
     <div class="stat-card danger" onclick="showPage('needAttention')">
@@ -3802,8 +3053,6 @@ function renderTeacherDashboard(){
     })()}
   </div>`:''}
 
-  ${(typeof renderMyTasksPanel==='function' && t.id) ? renderMyTasksPanel(t.id, tName) : ''}
-
   <div class="card" style="margin-top:20px">
     <div class="card-title"><i class="fas fa-bullhorn"></i> Admin Notice Board</div>
     ${notices.filter(n=>!n.class||n.class==='All'||myClasses.includes(n.class)).slice(-4).reverse().map(n=>`
@@ -3834,6 +3083,676 @@ function renderTeacherDashboard(){
 // ═══════════════════════════════════════════════════════════════════════
 //  STUDENTS PAGE  v13  — session switcher, smooth UI
 // ═══════════════════════════════════════════════════════════════════════
+function renderGovDashboard(){
+  const session=getActiveSession();
+  const students=(ls('students')||[]).filter(s=>s.session===session);
+  const stats=computeGovStats(students);
+  const pct=stats.total?Math.round(stats.ID_CREATED/stats.total*100):0;
+  const cards=[
+    ['👨‍🎓','Total Students',stats.total,'badge-primary'],
+    ['🟢','ID Created',stats.ID_CREATED,'badge-success'],
+    ['🟡','Form Submitted',stats.FORM_SUBMITTED,'badge-warning'],
+    ['🔵','Existing ID in Govt. School',stats.EXISTING_ID_IN_GOVT_SCHOOL,'badge-info'],
+    ['🔴','Form Not Submitted',stats.FORM_NOT_SUBMITTED,'badge-danger']
+  ];
+  return `
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+    <div>
+      <div style="font-size:22px;font-weight:900;color:#0d1f3c;display:flex;align-items:center;gap:10px">
+        <div style="width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,#1a3a6b,#c9a84c);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <i class="fas fa-landmark" style="color:white;font-size:16px"></i>
+        </div>
+        Government Record Dashboard
+      </div>
+      <div style="font-size:12px;color:#6b7a99;margin-top:3px;margin-left:48px">Session ${esc(session)}</div>
+    </div>
+    <button class="btn btn-sm" onclick="showPage('govClassRecords')" style="background:linear-gradient(135deg,#1a3a6b,#3b82f6);color:white;border:none;padding:9px 16px;border-radius:10px;font-weight:700;cursor:pointer">
+      <i class="fas fa-table"></i> View Class-wise Records
+    </button>
+  </div>
+
+  <div style="background:white;border-radius:14px;padding:16px 20px;margin-bottom:18px;border:1.5px solid #e8eef5">
+    <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:800;color:var(--primary);margin-bottom:8px">
+      <span>Government ID Completion</span><span>${pct}%</span>
+    </div>
+    <div style="height:12px;border-radius:8px;background:#f1f5f9;overflow:hidden">
+      <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#1a3a6b,#c9a84c);border-radius:8px"></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+    ${cards.map(([icon,label,val,badge])=>`
+      <div style="background:white;border-radius:14px;padding:14px 16px;border:1.5px solid #e8eef5;display:flex;align-items:center;gap:8px">
+        <div style="font-size:22px">${icon}</div>
+        <div style="min-width:0">
+          <div style="font-size:11px;color:#6b7a99;font-weight:700">${label}</div>
+          <div style="font-size:18px;font-weight:900;color:#0d1f3c">${val} <span style="font-size:11px;font-weight:700;color:#6b7a99">(${stats.total?Math.round(val/stats.total*100):0}%)</span></div>
+        </div>
+      </div>`).join('')}
+  </div>
+  <div style="margin-top:14px;font-size:11px;color:#94a3b8">
+    Note: this ERP prepares and tracks government record data. It does not submit directly to UDISE / Banglar Shiksha — export/print the data and submit through the official government portal, then record the status here.
+  </div>`;
+}
+
+function govClassGroups(students){
+  const groups={};
+  students.forEach(s=>{ (groups[s.class]=groups[s.class]||[]).push(s); });
+  return groups;
+}
+
+function renderGovClassRecords(){
+  const session=getActiveSession();
+  const allStudents=(ls('students')||[]).filter(s=>s.session===session);
+  const classes=getAllClasses().filter(c=>allStudents.some(s=>s.class===c));
+  const selClass=window._govSelClass||(classes[0]||'');
+  const students=allStudents.filter(s=>s.class===selClass).sort((a,b)=>(a.roll||0)-(b.roll||0));
+  const all=getAllGovRecords();
+  const buckets={green:[],yellow:[],blue:[],red:[]};
+  const rows=students.map(s=>{ const rec=all[s.id]||defaultGovRecord(); const b=govBucket(rec); buckets[b].push(s); return {s,rec,b}; });
+  const filter=window._govFilterBucket||''; // '' = show all
+  const visibleRows = filter ? rows.filter(r=>r.b===filter) : rows;
+  const rowBg={green:'#f0fdf4',yellow:'#fefce8',blue:'#eff6ff',red:'#fef2f2'};
+
+  return `
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px">
+    <div style="font-size:20px;font-weight:900;color:#0d1f3c">Class-wise Government Report</div>
+    <select onchange="window._govSelClass=this.value;window._govFilterBucket='';showPage('govClassRecords')" style="padding:9px 12px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px;font-weight:700">
+      ${classes.map(c=>`<option value="${esc(c)}" ${c===selClass?'selected':''}>${esc(c)}</option>`).join('')}
+    </select>
+  </div>
+
+  <div style="background:white;border-radius:14px;border:1.5px solid #e8eef5;padding:14px 16px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+    <div style="font-size:14px;font-weight:800;color:#0d1f3c">${esc(selClass)} — Total ${students.length} Students</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn btn-sm btn-outline" onclick="printClassGovReport()"><i class="fas fa-print"></i> Print Class Report</button>
+      <button class="btn btn-sm btn-outline" onclick="exportGovClassCSV()"><i class="fas fa-file-csv"></i> Export CSV</button>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:16px">
+    <div onclick="window._govFilterBucket='';showPage('govClassRecords')" style="cursor:pointer;background:${!filter?'#eef2ff':'white'};border:2px solid ${!filter?'#1a3a6b':'#e8eef5'};border-radius:12px;padding:12px 14px">
+      <div style="font-size:11px;font-weight:800;color:#1a3a6b">👨‍🎓 TOTAL STUDENTS</div>
+      <div style="font-size:22px;font-weight:900;color:#0d1f3c;margin-top:2px">${students.length}</div>
+    </div>
+    ${['green','yellow','blue','red'].map(b=>{
+      const m=GOV_BUCKET_META[b];
+      const active=filter===b;
+      return `<div onclick="window._govFilterBucket='${b}';showPage('govClassRecords')" style="cursor:pointer;background:${active?m.bg:'white'};border:2px solid ${active?m.color:'#e8eef5'};border-radius:12px;padding:12px 14px">
+        <div style="font-size:11px;font-weight:800;color:${m.color}">${m.icon} ${m.label}</div>
+        <div style="font-size:22px;font-weight:900;color:#0d1f3c;margin-top:2px">${buckets[b].length}</div>
+      </div>`;
+    }).join('')}
+  </div>
+
+  <div style="background:white;border-radius:14px;border:1.5px solid #e8eef5;overflow-x:auto">
+    ${!visibleRows.length?emptyState('📭','No students in this category',filter?'Try clearing the filter above':'No students found'):`
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px">
+      <thead><tr style="background:#f8faff;text-align:left">
+        <th style="padding:9px 10px">Roll</th><th style="padding:9px 10px">Student Name</th><th style="padding:9px 10px">Phone</th>
+        <th style="padding:9px 10px">Government ID</th>
+        <th style="padding:9px 10px">Status</th><th style="padding:9px 10px">Remarks</th><th style="padding:9px 10px">Action</th>
+      </tr></thead>
+      <tbody>
+        ${visibleRows.map(({s,rec,b})=>`<tr style="border-top:1px solid #f0f4ff;background:${rowBg[b]}">
+          <td style="padding:8px 10px;font-weight:700">${s.roll||'—'}</td>
+          <td style="padding:8px 10px;font-weight:700;color:var(--primary);white-space:nowrap">${esc(s.name)}</td>
+          <td style="padding:8px 10px;color:#6b7a99">${esc(s.phone||'—')}</td>
+          <td style="padding:8px 10px">${esc(rec.banglarShikshaId||'—')}</td>
+          <td style="padding:8px 10px">${govStatusBadge(rec.status)}</td>
+          <td style="padding:8px 10px;color:#6b7a99;max-width:200px;white-space:normal">${esc(rec.remarks||'—')}</td>
+          <td style="padding:8px 10px"><div style="display:flex;gap:5px;flex-wrap:nowrap">
+            <button class="btn btn-xs btn-primary" onclick="openGovEditor('${s.id}')" title="View / Edit"><i class="fas fa-edit"></i></button>
+            ${s.phone?`<button class="btn btn-xs" style="background:#22c55e;color:white;border:none" onclick="sendGovParentWhatsAppQuick('${s.id}')" title="Send WhatsApp to parent now"><i class="fab fa-whatsapp"></i></button>`:''}
+          </div></td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`}
+  </div>`;
+}
+
+function exportGovClassCSV(){
+  const session=getActiveSession();
+  const cls=window._govSelClass||'';
+  const students=(ls('students')||[]).filter(s=>s.session===session&&s.class===cls).sort((a,b)=>(a.roll||0)-(b.roll||0));
+  const all=getAllGovRecords();
+  const rows=[['Roll','Student Name','Phone','Government ID','Status','Remarks']];
+  students.forEach(s=>{
+    const rec=all[s.id]||defaultGovRecord();
+    rows.push([s.roll,s.name,s.phone,rec.banglarShikshaId||'',(GOV_STATUS_META[rec.status]||{}).label||rec.status,rec.remarks]);
+  });
+  const csv=rows.map(r=>r.map(c=>{const v=String(c===null||c===undefined?'':c);return/[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\r\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=`GovernmentRecords_${cls.replace(/\s/g,'_')}_${session}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Government report downloaded — opens in Excel');
+}
+
+function printClassGovReport(){
+  const session=getActiveSession();
+  const cls=window._govSelClass||'';
+  const students=(ls('students')||[]).filter(s=>s.session===session&&s.class===cls).sort((a,b)=>(a.roll||0)-(b.roll||0));
+  const all=getAllGovRecords();
+  const buckets={green:[],yellow:[],blue:[],red:[]};
+  const rows=students.map(s=>{ const rec=all[s.id]||defaultGovRecord(); const b=govBucket(rec); buckets[b].push(s); return {s,rec,b}; });
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>Government Report - ${esc(cls)}</title>
+  <style>
+    body{font-family:'Nunito',sans-serif;padding:24px;color:#1a2740}
+    .header{text-align:center;border-bottom:3px solid #1a3a6b;padding-bottom:14px;margin-bottom:16px}
+    h1{font-size:20px;color:#1a3a6b;margin:0}
+    h2{font-size:14px;color:#c9a84c;margin:4px 0 0}
+    table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:6px}
+    th{background:#1a3a6b;color:white;padding:6px 8px;text-align:left}
+    td{padding:6px 8px;border:1px solid #d0dbe8}
+    .summary{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:14px 0}
+    .summary div{border:1px solid #d0dbe8;border-radius:8px;padding:8px;text-align:center}
+    .footer{margin-top:34px;display:flex;justify-content:space-between;font-size:11.5px;border-top:1px solid #d0dbe8;padding-top:16px}
+    @page{size:A4;margin:15mm}
+  </style></head><body>
+  <div class="header">
+    <h1>Children's Paradise School</h1>
+    <div style="font-size:11px;color:#6b7a99">Uttar Radhanagar, Magrahat, South 24 Parganas, West Bengal</div>
+    <h2>CLASS-WISE GOVERNMENT STUDENT RECORD</h2>
+    <div style="font-size:11px;color:#6b7a99;margin-top:4px">Class: ${esc(cls)} &nbsp;|&nbsp; Session: ${esc(session)} &nbsp;|&nbsp; Date: ${esc(fmtDate(today()))}</div>
+  </div>
+  <div class="summary">
+    <div><b>${students.length}</b><br>Total Students</div>
+    <div>🟢 <b>${buckets.green.length}</b><br>ID Created</div>
+    <div>🟡 <b>${buckets.yellow.length}</b><br>Form Submitted</div>
+    <div>🔵 <b>${buckets.blue.length}</b><br>Existing ID in Govt. School</div>
+    <div>🔴 <b>${buckets.red.length}</b><br>Form Not Submitted</div>
+  </div>
+  <table><thead><tr><th>Roll</th><th>Student Name</th><th>Phone</th><th>Government ID</th><th>Status</th><th>Remarks</th></tr></thead>
+  <tbody>${rows.map(({s,rec})=>`<tr><td>${s.roll||'—'}</td><td>${esc(s.name)}</td><td>${esc(s.phone||'—')}</td><td>${esc(rec.banglarShikshaId||'—')}</td><td>${esc((GOV_STATUS_META[rec.status]||{}).label||rec.status)}</td><td>${esc(rec.remarks||'—')}</td></tr>`).join('')}</tbody></table>
+  <div class="footer">
+    <div>Office Signature: _______________</div>
+    <div>Principal Signature: _______________</div>
+  </div>
+  </body></html>`);
+  w.document.close(); w.focus(); setTimeout(()=>{w.print();w.close();},400);
+}
+
+function sendGovWhatsAppReminder(studentId){
+  const students=ls('students')||[];
+  const s=students.find(x=>x.id===studentId);
+  if(!s||!s.phone){ toast('No phone number on file for this student','error'); return; }
+  const msg=`Dear Parent/Guardian,\n\nThe DCF form for your child ${s.name} has not yet been submitted to the school office.\n\nClass: ${s.class}\nRoll No.: ${s.roll}\n\nPlease collect the DCF form from Children's Paradise School, complete it and submit it to the school office as soon as possible so that your child's details can be entered in the government portal.\n\nThank you.\n\nChildren's Paradise School\nUttar Radhanagar, Magrahat, South 24 Parganas, West Bengal`;
+  const phone=String(s.phone).replace(/\D/g,'');
+  window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`,'_blank');
+}
+const sendParentDCFReminder=sendGovWhatsAppReminder;
+
+function sendParentGovtSchoolWarning(studentId){
+  const students=ls('students')||[];
+  const s=students.find(x=>x.id===studentId);
+  if(!s||!s.phone){ toast('No phone number on file for this student','error'); return; }
+  const rec=getGovRecord(studentId);
+  const settings=ls('settings')||{};
+  const contact=settings.govContactNumber||'';
+  const msg=`Dear Parent/Guardian,\n\nOur school records show that your child ${s.name} already has a Banglar Shiksha ID/entry under another school.\n\nClass: ${s.class}\nRoll No.: ${s.roll}\n${rec.banglarShikshaId?`\nBanglar Shiksha ID:\n${rec.banglarShikshaId}\n`:''}\nPlease collect the Transfer Certificate (TC) from the previous school and submit it to the Children's Paradise School office as soon as possible.\n\nThis is required so that the student's government record can be processed correctly under our school.\n\nThank you.\n\nChildren's Paradise School\nUttar Radhanagar, Magrahat, South 24 Parganas, West Bengal${contact?'\n'+contact:''}`;
+  const phone=String(s.phone).replace(/\D/g,'');
+  window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`,'_blank');
+}
+function sendParentIDPendingUpdate(studentId){
+  const students=ls('students')||[];
+  const s=students.find(x=>x.id===studentId);
+  if(!s||!s.phone){ toast('No phone number on file for this student','error'); return; }
+  const msg=`Dear Parent/Guardian,\n\nThe DCF form for ${s.name} (Class ${s.class}, Roll ${s.roll}) has been submitted to the school office and the government record process is currently in progress.\n\nWe will update you once the Banglar Shiksha ID is received.\n\nThank you.\n\nChildren's Paradise School`;
+  const phone=String(s.phone).replace(/\D/g,'');
+  window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`,'_blank');
+}
+function sendParentRecordConfirmation(studentId){
+  const students=ls('students')||[];
+  const s=students.find(x=>x.id===studentId);
+  if(!s||!s.phone){ toast('No phone number on file for this student','error'); return; }
+  const rec=getGovRecord(studentId);
+  const msg=`Dear Parent/Guardian,\n\nWe are pleased to confirm that the government record ID for ${s.name} (Class ${s.class}, Roll ${s.roll}) has been created.\n${rec.banglarShikshaId?`\nBanglar Shiksha ID: ${rec.banglarShikshaId}\n`:''}\nThank you.\n\nChildren's Paradise School`;
+  const phone=String(s.phone).replace(/\D/g,'');
+  window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`,'_blank');
+}
+
+// Picks the correct parent WhatsApp template for a student's current government-record status
+// and sends it directly with a single call.
+function sendGovParentWhatsAppQuick(studentId){
+  const rec=getGovRecord(studentId);
+  const bucket=govBucket(rec);
+  if(bucket==='red') return sendParentDCFReminder(studentId);
+  if(bucket==='blue') return sendParentGovtSchoolWarning(studentId);
+  if(bucket==='yellow') return sendParentIDPendingUpdate(studentId);
+  return sendParentRecordConfirmation(studentId);
+}
+
+function renderGovFollowUp(){
+  const session=getActiveSession();
+  const students=(ls('students')||[]).filter(s=>s.session===session);
+  const all=getAllGovRecords();
+  const pending=students.filter(s=>govBucket(all[s.id]||defaultGovRecord())==='red')
+    .sort((a,b)=>(a.class||'').localeCompare(b.class||'')||(a.roll||0)-(b.roll||0));
+  return `
+  <div style="font-size:20px;font-weight:900;color:#0d1f3c;margin-bottom:16px">⚠️ Form Not Submitted — Follow-up</div>
+  <div style="background:white;border-radius:14px;border:1.5px solid #e8eef5;overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px">
+      <thead><tr style="background:#f8faff;text-align:left">
+        <th style="padding:10px 12px">Student</th><th style="padding:10px 12px">Class</th><th style="padding:10px 12px">Roll</th>
+        <th style="padding:10px 12px">Phone</th><th style="padding:10px 12px">Action</th>
+      </tr></thead>
+      <tbody>
+      ${pending.length?pending.map(s=>`<tr style="border-top:1px solid #f0f4ff">
+          <td style="padding:9px 12px;font-weight:700;color:var(--primary)">${esc(s.name)}</td>
+          <td style="padding:9px 12px">${esc(s.class)}</td>
+          <td style="padding:9px 12px">${s.roll||'—'}</td>
+          <td style="padding:9px 12px;color:#6b7a99">${esc(s.phone||'—')}</td>
+          <td style="padding:9px 12px;display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-sm btn-primary" onclick="openGovEditor('${s.id}')"><i class="fas fa-edit"></i> Update</button>
+            ${s.phone?`<button class="btn btn-sm" style="background:#22c55e;color:white;border:none" onclick="sendGovParentWhatsAppQuick('${s.id}')"><i class="fab fa-whatsapp"></i> Remind</button>`:''}
+          </td>
+        </tr>`).join(''):`<tr><td colspan="5" style="padding:24px;text-align:center;color:#94a3b8">No pending cases 🎉</td></tr>`}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function govAgeStatusBadge(v){
+  if(!v.applicable) return `<span class="badge badge-grey" style="display:inline-flex;align-items:center;gap:5px">⚪ N/A</span>`;
+  if(!v.mismatch) return `<span class="badge badge-success" style="display:inline-flex;align-items:center;gap:5px">🟢 MATCH</span>`;
+  return `<span class="badge" style="background:#ffedd5;color:#c2410c;display:inline-flex;align-items:center;gap:5px">🟠 AGE/CLASS DIFFERENCE</span>`;
+}
+
+function renderGovAgeVerification(){
+  const session=getActiveSession();
+  const sessionYear=parseInt(session)||new Date().getFullYear();
+  const allStudents=(ls('students')||[]).filter(s=>s.session===session);
+  const classes=getAllClasses().filter(c=>allStudents.some(s=>s.class===c));
+  const selClass=window._govAgeClass||''; // '' = all classes
+  const filterStatus=window._govAgeFilter||''; // '', 'match', 'diff', 'unreviewed', 'na'
+  const all=getAllGovRecords();
+
+  const students=allStudents.filter(s=>!selClass||s.class===selClass).sort((a,b)=>(a.class||'').localeCompare(b.class||'')||(a.roll||0)-(b.roll||0));
+  const rows=students.map(s=>{
+    const rec=all[s.id]||defaultGovRecord();
+    const v=computeAgeVerification(s,sessionYear);
+    return {s,rec,v};
+  });
+
+  const total=rows.length;
+  const matched=rows.filter(r=>r.v.applicable&&!r.v.mismatch).length;
+  const diff=rows.filter(r=>r.v.mismatch).length;
+  const unreviewed=rows.filter(r=>r.v.mismatch&&r.rec.ageVerificationStatus==='Not Reviewed').length;
+  const na=rows.filter(r=>!r.v.applicable).length;
+
+  let visible=rows;
+  if(filterStatus==='match') visible=rows.filter(r=>r.v.applicable&&!r.v.mismatch);
+  else if(filterStatus==='diff') visible=rows.filter(r=>r.v.mismatch);
+  else if(filterStatus==='unreviewed') visible=rows.filter(r=>r.v.mismatch&&r.rec.ageVerificationStatus==='Not Reviewed');
+  else if(filterStatus==='na') visible=rows.filter(r=>!r.v.applicable);
+
+  return `
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+    <div>
+      <div style="font-size:20px;font-weight:900;color:#0d1f3c">🎂 Age & Government Class Verification</div>
+      <div style="font-size:11.5px;color:#6b7a99;margin-top:2px">Compares each student's age (as on 1 Jan ${sessionYear}) against the configured government age-appropriate class. This is a school-side verification tool only — it never changes a student's actual school class.</div>
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="openGovAgeRuleSettings()"><i class="fas fa-cog"></i> Age Rule Settings</button>
+  </div>
+
+  <div style="background:white;border-radius:14px;border:1.5px solid #e8eef5;padding:14px 16px;margin-bottom:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <select onchange="window._govAgeClass=this.value;showPage('govAgeVerification')" style="padding:9px 12px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px;font-weight:700">
+      <option value="">All Classes</option>
+      ${classes.map(c=>`<option value="${esc(c)}" ${c===selClass?'selected':''}>${esc(c)}</option>`).join('')}
+    </select>
+    <button class="btn btn-sm btn-outline" onclick="printGovAgeVerification()"><i class="fas fa-print"></i> Print</button>
+    <button class="btn btn-sm btn-outline" onclick="exportGovAgeVerificationCSV()"><i class="fas fa-file-csv"></i> Export CSV</button>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:16px">
+    <div onclick="window._govAgeFilter='';showPage('govAgeVerification')" style="cursor:pointer;background:${!filterStatus?'#eef2ff':'white'};border:2px solid ${!filterStatus?'#1a3a6b':'#e8eef5'};border-radius:12px;padding:12px 14px">
+      <div style="font-size:11px;font-weight:800;color:#1a3a6b">👨‍🎓 TOTAL</div><div style="font-size:22px;font-weight:900;color:#0d1f3c;margin-top:2px">${total}</div>
+    </div>
+    <div onclick="window._govAgeFilter='match';showPage('govAgeVerification')" style="cursor:pointer;background:${filterStatus==='match'?'#dcfce7':'white'};border:2px solid ${filterStatus==='match'?'#15803d':'#e8eef5'};border-radius:12px;padding:12px 14px">
+      <div style="font-size:11px;font-weight:800;color:#15803d">🟢 MATCH</div><div style="font-size:22px;font-weight:900;color:#0d1f3c;margin-top:2px">${matched}</div>
+    </div>
+    <div onclick="window._govAgeFilter='diff';showPage('govAgeVerification')" style="cursor:pointer;background:${filterStatus==='diff'?'#ffedd5':'white'};border:2px solid ${filterStatus==='diff'?'#c2410c':'#e8eef5'};border-radius:12px;padding:12px 14px">
+      <div style="font-size:11px;font-weight:800;color:#c2410c">🟠 AGE/CLASS DIFFERENCE</div><div style="font-size:22px;font-weight:900;color:#0d1f3c;margin-top:2px">${diff}</div>
+    </div>
+    <div onclick="window._govAgeFilter='unreviewed';showPage('govAgeVerification')" style="cursor:pointer;background:${filterStatus==='unreviewed'?'#fee2e2':'white'};border:2px solid ${filterStatus==='unreviewed'?'#b91c1c':'#e8eef5'};border-radius:12px;padding:12px 14px">
+      <div style="font-size:11px;font-weight:800;color:#b91c1c">⚠️ NEEDS VERIFICATION</div><div style="font-size:22px;font-weight:900;color:#0d1f3c;margin-top:2px">${unreviewed}</div>
+    </div>
+    <div onclick="window._govAgeFilter='na';showPage('govAgeVerification')" style="cursor:pointer;background:${filterStatus==='na'?'#f1f5f9':'white'};border:2px solid ${filterStatus==='na'?'#64748b':'#e8eef5'};border-radius:12px;padding:12px 14px">
+      <div style="font-size:11px;font-weight:800;color:#64748b">⚪ N/A (no DOB / rule)</div><div style="font-size:22px;font-weight:900;color:#0d1f3c;margin-top:2px">${na}</div>
+    </div>
+  </div>
+
+  <div style="background:white;border-radius:14px;border:1.5px solid #e8eef5;overflow-x:auto">
+    ${!visible.length?emptyState('📭','No students in this category','Try a different filter'):`
+    <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1100px">
+      <thead><tr style="background:#f8faff;text-align:left">
+        <th style="padding:8px 9px">Roll</th><th style="padding:8px 9px">Student</th><th style="padding:8px 9px">Phone</th>
+        <th style="padding:8px 9px">DOB</th><th style="padding:8px 9px">Age (on 1 Jan)</th><th style="padding:8px 9px">School Class</th>
+        <th style="padding:8px 9px">Govt. Age Class</th><th style="padding:8px 9px">Government ID</th>
+        <th style="padding:8px 9px">Status</th><th style="padding:8px 9px">Remarks</th><th style="padding:8px 9px">Action</th>
+      </tr></thead>
+      <tbody>
+        ${visible.map(({s,rec,v})=>`<tr style="border-top:1px solid #f0f4ff;background:${v.mismatch?'#fffaf3':'white'}">
+          <td style="padding:7px 9px;font-weight:700">${s.roll||'—'}</td>
+          <td style="padding:7px 9px;font-weight:700;color:var(--primary);white-space:nowrap">${esc(s.name)}</td>
+          <td style="padding:7px 9px;color:#6b7a99">${esc(s.phone||'—')}</td>
+          <td style="padding:7px 9px;color:#6b7a99">${fmtDate(s.dob)}</td>
+          <td style="padding:7px 9px">${v.age===null?'—':v.age+' yrs'}</td>
+          <td style="padding:7px 9px">${esc(s.class)}</td>
+          <td style="padding:7px 9px;font-weight:700">${esc(v.ageAppropriateClass||'—')}</td>
+          <td style="padding:7px 9px">${esc(rec.banglarShikshaId||'—')}</td>
+          <td style="padding:7px 9px">${govAgeStatusBadge(v)}</td>
+          <td style="padding:7px 9px;color:#6b7a99;max-width:150px">${esc(rec.ageDifferenceExplanation||rec.remarks||'—')}</td>
+          <td style="padding:7px 9px">${v.mismatch?`<button class="btn btn-xs btn-primary" onclick="openGovAgeReview('${s.id}')"><i class="fas fa-search"></i> Review</button>`:`<button class="btn btn-xs btn-outline" onclick="openGovEditor('${s.id}')"><i class="fas fa-edit"></i></button>`}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`}
+  </div>`;
+}
+
+function openGovAgeReview(studentId){
+  const students=ls('students')||[];
+  const s=students.find(x=>x.id===studentId);
+  if(!s) return;
+  const session=getActiveSession();
+  const sessionYear=parseInt(session)||new Date().getFullYear();
+  const rec=getGovRecord(studentId);
+  const v=computeAgeVerification(s,sessionYear);
+  openModal(`Age / Class Verification — ${esc(s.name)}`,`
+    <div style="background:#fff7ed;border:1.5px solid #fdba74;border-radius:10px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-weight:900;color:#9a3412;font-size:13px;margin-bottom:6px">🟠 AGE / CLASS DIFFERENCE</div>
+      <div style="font-size:12.5px;color:#7c2d12;line-height:1.6">
+        Student is currently studying in <b>${esc(s.class)}</b> in this school. Based on date of birth and age calculation as on 1 January of the academic year, the government age-appropriate class is <b>${esc(v.ageAppropriateClass)}</b> (age ${v.age} on 1 Jan ${sessionYear}).
+      </div>
+      <div style="font-size:11px;color:#9a3412;margin-top:8px;font-style:italic">This explanation is generated for office reference only — it is not a government-approved statement. Please verify the correct reason and supporting documents before any government portal submission.</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group"><label>Current School Class</label><input value="${esc(s.class)}" disabled style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border);background:#f1f5f9"></div>
+      <div class="form-group"><label>Government Portal Class</label>
+        <select id="govPortalClass" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)">
+          <option value="${esc(v.ageAppropriateClass)}" selected>${esc(v.ageAppropriateClass)} (age-appropriate)</option>
+          <option value="${esc(s.class)}">${esc(s.class)} (keep as school class)</option>
+        </select>
+      </div>
+      <div class="form-group" style="grid-column:1/-1"><label>Reason for Difference</label>
+        <select id="govAgeReason" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)">
+          <option value="">— Select —</option>
+          ${GOV_AGE_DIFF_REASONS.map(r=>`<option ${rec.ageDifferenceReason===r?'selected':''}>${r}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group" style="grid-column:1/-1"><label>Detailed Explanation</label><textarea id="govAgeExplanation" rows="3" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)">${esc(rec.ageDifferenceExplanation)}</textarea></div>
+      <div class="form-group" style="grid-column:1/-1"><label>Supporting Document Note</label><input id="govAgeDocNote" value="${esc(rec.ageSupportingDocNote)}" placeholder="e.g. Birth certificate copy filed in student folder" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)"></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="saveGovAgeReview('${studentId}','Reviewed')"><i class="fas fa-save"></i> Record Difference</button>
+      <button class="btn btn-success" onclick="saveGovAgeReview('${studentId}','Verified')"><i class="fas fa-check-circle"></i> Mark Verified</button>
+      <button class="btn btn-outline" onclick="printGovAgeNote('${studentId}')"><i class="fas fa-print"></i> Print Verification Note</button>
+    </div>
+  `,[],'lg');
+}
+function saveGovAgeReview(studentId,status){
+  const govPortalClass=document.getElementById('govPortalClass').value;
+  const ageDifferenceReason=document.getElementById('govAgeReason').value;
+  const ageDifferenceExplanation=document.getElementById('govAgeExplanation').value;
+  const ageSupportingDocNote=document.getElementById('govAgeDocNote').value;
+  saveGovRecord(studentId,{governmentPortalClass:govPortalClass,ageDifferenceReason,ageDifferenceExplanation,ageSupportingDocNote,ageVerificationStatus:status});
+  toast(status==='Verified'?'Marked verified ✅':'Difference recorded');
+  closeModal();
+  showPage('govAgeVerification');
+}
+function printGovAgeNote(studentId){
+  const students=ls('students')||[];
+  const s=students.find(x=>x.id===studentId);
+  if(!s) return;
+  const session=getActiveSession();
+  const sessionYear=parseInt(session)||new Date().getFullYear();
+  const rec=getGovRecord(studentId);
+  const v=computeAgeVerification(s,sessionYear);
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>Age Verification Note - ${esc(s.name)}</title>
+  <style>body{font-family:'Nunito',sans-serif;padding:30px;color:#1a2740}.header{text-align:center;border-bottom:3px solid #1a3a6b;padding-bottom:14px;margin-bottom:20px}h1{font-size:20px;color:#1a3a6b;margin:0}h2{font-size:14px;color:#c9a84c;margin:4px 0 0}table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}td{padding:8px;border:1px solid #d0dbe8}td:first-child{font-weight:700;width:38%;background:#f8faff}.footer{margin-top:50px;display:flex;justify-content:space-between;font-size:12px}@page{size:A4;margin:20mm}</style>
+  </head><body>
+  <div class="header"><h1>Children's Paradise School</h1><div style="font-size:11px;color:#6b7a99">Uttar Radhanagar, Magrahat, South 24 Parganas, West Bengal</div><h2>AGE / GOVERNMENT CLASS VERIFICATION NOTE</h2></div>
+  <table>
+    <tr><td>Student Name</td><td>${esc(s.name)}</td></tr>
+    <tr><td>Class / Roll</td><td>${esc(s.class)} / ${s.roll||'—'}</td></tr>
+    <tr><td>Date of Birth</td><td>${fmtDate(s.dob)}</td></tr>
+    <tr><td>Age on 1 Jan ${sessionYear}</td><td>${v.age===null?'—':v.age+' years'}</td></tr>
+    <tr><td>Current School Class</td><td>${esc(s.class)}</td></tr>
+    <tr><td>Government Age-Appropriate Class</td><td>${esc(v.ageAppropriateClass||'—')}</td></tr>
+    <tr><td>Government Portal Class (recorded)</td><td>${esc(rec.governmentPortalClass||'—')}</td></tr>
+    <tr><td>Reason for Difference</td><td>${esc(rec.ageDifferenceReason||'—')}</td></tr>
+    <tr><td>Detailed Explanation</td><td>${esc(rec.ageDifferenceExplanation||'—')}</td></tr>
+    <tr><td>Supporting Document Note</td><td>${esc(rec.ageSupportingDocNote||'—')}</td></tr>
+    <tr><td>Verification Status</td><td>${esc(rec.ageVerificationStatus||'Not Reviewed')}</td></tr>
+  </table>
+  <div style="font-size:11px;color:#94a3b8;margin-top:16px;font-style:italic">This note is a school-office record for internal verification purposes only. It does not represent a government-approved determination — please verify against applicable government orders before any portal submission.</div>
+  <div class="footer"><div>Office Verified By: _______________</div><div>Principal Signature: _______________</div></div>
+  </body></html>`);
+  w.document.close(); w.focus(); setTimeout(()=>{w.print();w.close();},400);
+}
+
+function printGovAgeVerification(){
+  const session=getActiveSession();
+  const sessionYear=parseInt(session)||new Date().getFullYear();
+  const cls=window._govAgeClass||'';
+  const students=(ls('students')||[]).filter(s=>s.session===session&&(!cls||s.class===cls)).sort((a,b)=>(a.class||'').localeCompare(b.class||'')||(a.roll||0)-(b.roll||0));
+  const all=getAllGovRecords();
+  const rows=students.map(s=>({s,rec:all[s.id]||defaultGovRecord(),v:computeAgeVerification(s,sessionYear)}));
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>Age & Class Verification</title>
+  <style>body{font-family:'Nunito',sans-serif;padding:24px;color:#1a2740}.header{text-align:center;border-bottom:3px solid #1a3a6b;padding-bottom:14px;margin-bottom:16px}h1{font-size:20px;color:#1a3a6b;margin:0}h2{font-size:13px;color:#c9a84c;margin:4px 0 0}table{width:100%;border-collapse:collapse;font-size:10px}th{background:#1a3a6b;color:white;padding:6px;text-align:left}td{padding:6px;border:1px solid #d0dbe8}.footer{margin-top:30px;display:flex;justify-content:space-between;font-size:11px}@page{size:A4 landscape;margin:12mm}</style>
+  </head><body>
+  <div class="header"><h1>Children's Paradise School</h1><div style="font-size:11px;color:#6b7a99">Uttar Radhanagar, Magrahat, South 24 Parganas, West Bengal</div><h2>AGE & GOVERNMENT CLASS VERIFICATION — ${cls?esc(cls):'All Classes'} (Session ${esc(session)})</h2></div>
+  <table><thead><tr><th>Roll</th><th>Name</th><th>DOB</th><th>Age</th><th>School Class</th><th>Govt Age Class</th><th>Government ID</th><th>Status</th><th>Remarks</th></tr></thead>
+  <tbody>${rows.map(({s,rec,v})=>`<tr><td>${s.roll||'—'}</td><td>${esc(s.name)}</td><td>${fmtDate(s.dob)}</td><td>${v.age===null?'—':v.age}</td><td>${esc(s.class)}</td><td>${esc(v.ageAppropriateClass||'—')}</td><td>${esc(rec.banglarShikshaId||'—')}</td><td>${v.applicable?(v.mismatch?'AGE/CLASS DIFFERENCE':'MATCH'):'N/A'}</td><td>${esc(rec.ageDifferenceExplanation||'—')}</td></tr>`).join('')}</tbody></table>
+  <div class="footer"><div>Office Signature: _______________</div><div>Principal Signature: _______________</div></div>
+  </body></html>`);
+  w.document.close(); w.focus(); setTimeout(()=>{w.print();w.close();},400);
+}
+
+function exportGovAgeVerificationCSV(){
+  const session=getActiveSession();
+  const sessionYear=parseInt(session)||new Date().getFullYear();
+  const cls=window._govAgeClass||'';
+  const students=(ls('students')||[]).filter(s=>s.session===session&&(!cls||s.class===cls)).sort((a,b)=>(a.class||'').localeCompare(b.class||'')||(a.roll||0)-(b.roll||0));
+  const all=getAllGovRecords();
+  const rows=[['Roll','Student Name','DOB','Age (1 Jan)','School Class','Govt. Age Class','Govt. Portal Class','Government ID','Status','Reason','Explanation']];
+  students.forEach(s=>{
+    const rec=all[s.id]||defaultGovRecord();
+    const v=computeAgeVerification(s,sessionYear);
+    rows.push([s.roll,s.name,s.dob,v.age,s.class,v.ageAppropriateClass||'',rec.governmentPortalClass||'',rec.banglarShikshaId||'',v.applicable?(v.mismatch?'AGE/CLASS DIFFERENCE':'MATCH'):'N/A',rec.ageDifferenceReason||'',rec.ageDifferenceExplanation||'']);
+  });
+  const csv=rows.map(r=>r.map(c=>{const v=String(c===null||c===undefined?'':c);return/[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\r\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=`AgeClassVerification_${session}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Age verification report downloaded');
+}
+
+function openGovAgeRuleSettings(){
+  const rules=getGovAgeRules();
+  openModal('Government Age Rule Settings',`
+    <div style="font-size:11.5px;color:#6b7a99;margin-bottom:12px">Age is calculated as on 1 January of the academic year. Update this table if the government issues a new age-class order. Changing these numbers never moves any student — it only affects future verification calculations.</div>
+    <div id="govAgeRuleRows">
+      ${rules.map((r,i)=>`
+      <div style="display:grid;grid-template-columns:1.3fr 0.7fr 0.7fr 1.6fr auto;gap:6px;margin-bottom:8px;align-items:center" data-rule-row="${i}">
+        <input value="${esc(r.govClass)}" placeholder="Govt. Class" style="padding:8px;border-radius:6px;border:1.5px solid var(--border);font-size:12px">
+        <input type="number" value="${r.minAge}" placeholder="Min age" style="padding:8px;border-radius:6px;border:1.5px solid var(--border);font-size:12px">
+        <input type="number" value="${r.maxAge}" placeholder="Max age" style="padding:8px;border-radius:6px;border:1.5px solid var(--border);font-size:12px">
+        <input value="${esc((r.schoolClasses||[]).join(', '))}" placeholder="School classes (comma-separated)" style="padding:8px;border-radius:6px;border:1.5px solid var(--border);font-size:12px">
+        <button class="btn btn-xs btn-outline" onclick="this.closest('[data-rule-row]').remove()"><i class="fas fa-trash"></i></button>
+      </div>`).join('')}
+    </div>
+    <button class="btn btn-outline btn-sm" onclick="addGovAgeRuleRow()"><i class="fas fa-plus"></i> Add Row</button>
+    <div style="margin-top:14px"><button class="btn btn-primary" onclick="saveGovAgeRuleSettings()"><i class="fas fa-save"></i> Save Rules</button></div>
+  `,[],'lg');
+}
+function addGovAgeRuleRow(){
+  const container=document.getElementById('govAgeRuleRows');
+  const div=document.createElement('div');
+  div.setAttribute('data-rule-row','new');
+  div.style.cssText='display:grid;grid-template-columns:1.3fr 0.7fr 0.7fr 1.6fr auto;gap:6px;margin-bottom:8px;align-items:center';
+  div.innerHTML=`
+    <input placeholder="Govt. Class" style="padding:8px;border-radius:6px;border:1.5px solid var(--border);font-size:12px">
+    <input type="number" placeholder="Min age" style="padding:8px;border-radius:6px;border:1.5px solid var(--border);font-size:12px">
+    <input type="number" placeholder="Max age" style="padding:8px;border-radius:6px;border:1.5px solid var(--border);font-size:12px">
+    <input placeholder="School classes (comma-separated)" style="padding:8px;border-radius:6px;border:1.5px solid var(--border);font-size:12px">
+    <button class="btn btn-xs btn-outline" onclick="this.closest('[data-rule-row]').remove()"><i class="fas fa-trash"></i></button>`;
+  container.appendChild(div);
+}
+function saveGovAgeRuleSettings(){
+  const rows=document.querySelectorAll('#govAgeRuleRows [data-rule-row]');
+  const rules=[];
+  rows.forEach(row=>{
+    const inputs=row.querySelectorAll('input');
+    const govClass=inputs[0].value.trim();
+    const minAge=parseInt(inputs[1].value);
+    const maxAge=parseInt(inputs[2].value);
+    const schoolClasses=inputs[3].value.split(',').map(c=>c.trim()).filter(Boolean);
+    if(govClass&&!isNaN(minAge)&&!isNaN(maxAge)) rules.push({govClass,minAge,maxAge,schoolClasses});
+  });
+  if(!rules.length){ toast('Add at least one valid rule row','error'); return; }
+  saveGovAgeRules(rules);
+  toast('Age rules saved ✅');
+  closeModal();
+  showPage('govAgeVerification');
+}
+
+function openGovEditor(studentId){
+  const students=ls('students')||[];
+  const s=students.find(x=>x.id===studentId);
+  if(!s) return;
+  const rec=getGovRecord(studentId);
+  openModal(`Government Record — ${esc(s.name)}`,`
+    <div style="font-size:11.5px;color:#6b7a99;margin-bottom:12px">${esc(s.class)} · Roll ${s.roll||'—'} · ${esc(s.studentId||'')}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group" style="grid-column:1/-1"><label>Government Record Status</label>
+        <select id="govStatus" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)">
+          ${Object.keys(GOV_STATUS_META).map(k=>`<option value="${k}" ${rec.status===k?'selected':''}>${GOV_STATUS_META[k].icon} ${GOV_STATUS_META[k].label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group" style="grid-column:1/-1"><label>Government ID (Banglar Shiksha) — optional</label><input id="govBanglar" value="${esc(rec.banglarShikshaId)}" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)"></div>
+      <div class="form-group" style="grid-column:1/-1"><label>Remarks</label><textarea id="govRemarks" rows="2" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)">${esc(rec.remarks)}</textarea></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="submitGovEditor('${studentId}')"><i class="fas fa-save"></i> Save Changes</button>
+      ${s.phone?`<button class="btn" style="background:#22c55e;color:white;border:none;padding:9px 14px;border-radius:8px" onclick="sendGovParentWhatsAppQuick('${studentId}')"><i class="fab fa-whatsapp"></i> WhatsApp Parent</button>`:''}
+    </div>
+  `,[]);
+}
+function submitGovEditor(studentId){
+  const patch={
+    status:val('govStatus'),
+    banglarShikshaId:val('govBanglar'),
+    remarks:val('govRemarks')
+  };
+  saveGovRecord(studentId,patch);
+  toast('Government record updated');
+  closeModal();
+  const activePage=document.querySelector('.nav-item.active')?.dataset.page;
+  if(activePage&&activePage.startsWith('gov')) showPage(activePage);
+  function val(id){ const el=document.getElementById(id); return el?el.value:''; }
+}
+
+
+function viewerSuggest(val){
+  window._viewerQuery=val;
+  const box=document.getElementById('viewerSuggestions');
+  if(!box) return;
+  const q=(val||'').trim().toLowerCase();
+  if(!q){ box.style.display='none'; box.innerHTML=''; return; }
+  const session=getActiveSession();
+  const selClass=window._viewerClass||'';
+  let students=(ls('students')||[]).filter(s=>s.session===session);
+  if(selClass) students=students.filter(s=>s.class===selClass);
+  const starts=students.filter(s=>(s.name||'').toLowerCase().startsWith(q));
+  const contains=students.filter(s=>!(s.name||'').toLowerCase().startsWith(q) && (s.name||'').toLowerCase().includes(q));
+  const list=[...starts,...contains].slice(0,8);
+  if(!list.length){ box.style.display='none'; box.innerHTML=''; return; }
+  box.innerHTML=list.map(s=>`
+    <div onmousedown="viewerPickSuggestion('${s.id}')" style="padding:10px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;border-bottom:1px solid #f0f4ff" onmouseover="this.style.background='#f8faff'" onmouseout="this.style.background='white'">
+      <div style="width:30px;height:30px;border-radius:8px;background:#eef2ff;color:#1a3a6b;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;flex-shrink:0">${esc((s.name||'?')[0].toUpperCase())}</div>
+      <div style="min-width:0"><div style="font-weight:700;font-size:13px;color:#0d1f3c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(s.name)}</div><div style="font-size:10.5px;color:#6b7a99">${esc(s.class)} · Roll ${s.roll||'—'} · ${esc(s.studentId||'')}</div></div>
+    </div>`).join('');
+  box.style.display='block';
+}
+function viewerPickSuggestion(id){
+  const box=document.getElementById('viewerSuggestions');
+  if(box){ box.style.display='none'; box.innerHTML=''; }
+  openStudentProfile(id);
+}
+function renderStudentSearch(){
+  const session=getActiveSession();
+  const allStudents=(ls('students')||[]).filter(s=>s.session===session);
+  const classes=getAllClasses();
+  const selClass=window._viewerClass||'';
+  const q=(window._viewerQuery||'').trim().toLowerCase();
+  let results=allStudents;
+  if(selClass) results=results.filter(s=>s.class===selClass);
+  if(q) results=results.filter(s=>
+    (s.name||'').toLowerCase().includes(q) ||
+    String(s.roll||'').toLowerCase().includes(q) ||
+    (s.studentId||'').toLowerCase().includes(q) ||
+    (s.phone||'').toLowerCase().includes(q) ||
+    (s.fatherName||'').toLowerCase().includes(q)
+  );
+  results=results.sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const showResults = selClass || q;
+  return `
+  <div style="max-width:900px;margin:0 auto">
+    <div style="text-align:center;margin-bottom:22px">
+      <div style="width:52px;height:52px;border-radius:16px;background:linear-gradient(135deg,#1a3a6b,#c9a84c);display:flex;align-items:center;justify-content:center;margin:0 auto 10px">
+        <i class="fas fa-search" style="color:white;font-size:20px"></i>
+      </div>
+      <div style="font-size:20px;font-weight:900;color:#0d1f3c">Student Details Search</div>
+      <div style="font-size:12px;color:#6b7a99;margin-top:2px">${currentUser.role==='viewer'?'Look up any student\'s full record — view only, no changes can be made':'Instantly find any student and jump straight to their full profile'}</div>
+    </div>
+    ${currentUser.role==='principal'?`
+    <div style="background:#f8faff;border:1.5px solid #e8eef5;border-radius:12px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#334155">
+        <i class="fas fa-lock" style="color:#c9a84c"></i>
+        <span><b>Details Search login</b> (read-only student lookup) — ${(()=>{const v=(ls('users')||[]).filter(u=>u.role==='viewer');return v.length?v.map(u=>esc(u.username)).join(', '):'no account set up yet';})()}</span>
+      </div>
+      <button class="btn btn-sm btn-outline" onclick="openAddViewerAccount(${(()=>{const v=(ls('users')||[]).filter(u=>u.role==='viewer');return v.length?`'${v[0].id}'`:'';})()})"><i class="fas fa-key"></i> ${(()=>{const v=(ls('users')||[]).filter(u=>u.role==='viewer');return v.length?'Change Password':'Set Up Account';})()}</button>
+    </div>`:''}
+    <div style="background:white;border-radius:14px;border:1.5px solid #e8eef5;padding:20px;display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;box-shadow:0 2px 10px rgba(13,31,60,.04)">
+      <select id="viewerClassSel" onchange="window._viewerClass=this.value;showPage('studentSearch')" style="flex:1;min-width:160px;padding:14px 12px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px;font-weight:700">
+        <option value="">All Classes</option>
+        ${classes.map(c=>`<option value="${esc(c)}" ${c===selClass?'selected':''}>${esc(c)}</option>`).join('')}
+      </select>
+      <div style="position:relative;flex:3;min-width:240px">
+        <input id="viewerSearchInput" value="${esc(window._viewerQuery||'')}" placeholder="Search by name, roll, student ID, phone, father's name…" autofocus autocomplete="off"
+          oninput="viewerSuggest(this.value)" onfocus="if(this.value) viewerSuggest(this.value)"
+          onblur="setTimeout(()=>{const b=document.getElementById('viewerSuggestions');if(b)b.style.display='none'},150)"
+          onkeydown="if(event.key==='Enter'){const b=document.getElementById('viewerSuggestions');if(b)b.style.display='none';showPage('studentSearch')}"
+          style="width:100%;padding:14px 16px;border:2px solid #e2e8f0;border-radius:10px;font-size:15px;box-sizing:border-box">
+        <div id="viewerSuggestions" style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;background:white;border:1.5px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 24px rgba(13,31,60,.12);z-index:50;max-height:320px;overflow-y:auto"></div>
+      </div>
+      <button class="btn btn-primary" onclick="showPage('studentSearch')" style="padding:0 22px"><i class="fas fa-search"></i> Search</button>
+    </div>
+    ${!showResults?emptyState('🔍','Select a class or type to search','Results will appear here'):
+      results.length?`
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">
+        ${results.map(s=>`
+        <div onclick="openStudentProfile('${s.id}')" style="background:white;border:1.5px solid #e8eef5;border-radius:12px;padding:12px 14px;cursor:pointer;display:flex;align-items:center;gap:10px" onmouseover="this.style.borderColor='#c9a84c'" onmouseout="this.style.borderColor='#e8eef5'">
+          <div style="width:38px;height:38px;border-radius:10px;background:#eef2ff;color:#1a3a6b;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:15px;flex-shrink:0">${esc((s.name||'?')[0].toUpperCase())}</div>
+          <div style="min-width:0">
+            <div style="font-weight:800;font-size:13.5px;color:#0d1f3c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(s.name)}</div>
+            <div style="font-size:11px;color:#6b7a99">${esc(s.class)} · Roll ${s.roll||'—'} · ${esc(s.studentId||'')}</div>
+          </div>
+        </div>`).join('')}
+      </div>`:emptyState('🚫','No matching students found','Try a different name, class or ID')}
+  </div>`;
+}
+
 function renderStudents(){
   const allSessions = ls('sessions')||['2025','2026','2027','2028'];
   const activeSession = getActiveSession();
@@ -9028,7 +8947,7 @@ function renderDataManagement(){
 
 function backupData(){
   const data={};
-  ['users','students','teachers','fees','attendance','marks','notices','calendar','stock','sales','expenses','routine','classSubjects','ageRanges','feeStructure','activeSession','receipts','idCardLayout','studentFollowUps','attentionSettings','academicHistory','syllabus','teacherAbsent','substituteAssignments','examRegisterMarks','marksSourceLog','marksSubmissionDeadline','tasks','examPlans'].forEach(k=>{data[k]=ls(k)});
+  ['users','students','teachers','fees','attendance','marks','notices','calendar','stock','sales','expenses','routine','classSubjects','ageRanges','feeStructure','activeSession','receipts','idCardLayout','studentFollowUps','attentionSettings','academicHistory','syllabus','teacherAbsent','substituteAssignments','examRegisterMarks','marksSourceLog','marksSubmissionDeadline'].forEach(k=>{data[k]=ls(k)});
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
@@ -9084,12 +9003,23 @@ function clearAllData(){
 // ═══════════════════════════════════════════════════════════════════════
 //  CLOUD SYNC (Supabase) — auto-sync + manual backup/restore, multi-device
 // ═══════════════════════════════════════════════════════════════════════
-const CLOUD_SYNC_KEYS=['users','students','teachers','fees','attendance','marks','notices','calendar','stock','sales','expenses','routine','classSubjects','ageRanges','feeStructure','activeSession','receipts','idCardLayout','studentFollowUps','attentionSettings','academicHistory','syllabus','teacherAbsent','periodTimings','settings','sessions','substituteAssignments','examRegisterMarks','marksSourceLog','marksSubmissionDeadline','tasks','examPlans'];
+const CLOUD_SYNC_KEYS=['users','students','teachers','fees','attendance','marks','notices','calendar','stock','sales','expenses','routine','classSubjects','ageRanges','feeStructure','activeSession','receipts','idCardLayout','studentFollowUps','attentionSettings','academicHistory','syllabus','teacherAbsent','periodTimings','settings','sessions','substituteAssignments','examRegisterMarks','marksSourceLog','marksSubmissionDeadline','govRecords','govSubmissionHistory','govActivityLog','govAgeRules'];
 
 let _sbClient=null, _sbUser=null, _sbChannel=null, _sbPushTimers={}, _sbBusy=false;
 const _sbOrigin='dev_'+Math.random().toString(36).slice(2)+'_'+Date.now();
 
 function getCloudConfig(){ return ls('cloudSyncConfig')||null; } // {url, anonKey}
+// One-time bootstrap: pre-fills the Cloud Sync connection so Sau doesn't have to
+// hand-copy the Project URL/key into Settings. Only runs if nothing is saved yet —
+// never overwrites a config already set (manually or from a previous device).
+(function bootstrapCloudConfig(){
+  if(!localStorage.getItem('cloudSyncConfig')){
+    localStorage.setItem('cloudSyncConfig', JSON.stringify({
+      url:'https://pvznzqrbuiywxbfwxtxn.supabase.co',
+      anonKey:'sb_publishable_Iv0kA4pbQ0Ro4xOaebvCNg_ydVsXVIM'
+    }));
+  }
+})();
 function saveCloudConfigRaw(url,anonKey){ localStorage.setItem('cloudSyncConfig', JSON.stringify({url,anonKey})); }
 function clearCloudConfig(){ localStorage.removeItem('cloudSyncConfig'); localStorage.removeItem('cloudSyncEmail'); }
 
@@ -9386,6 +9316,13 @@ function renderSettings(){
       <div class="form-group"><label>Confirm New Password</label><input type="password" id="cpConfirm" placeholder="Confirm password"></div>
       <button class="btn btn-primary" onclick="changePassword()"><i class="fas fa-key"></i> Change Password</button>
     </div>
+    ${isPrincipal?`
+    <div class="card">
+      <div class="card-title"><i class="fas fa-search"></i> Details Search Accounts (Read-Only)</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">These logins can search and view any student's full details (academic, fees, results) but cannot edit or delete anything.</div>
+      <div id="viewerAcctList">${renderViewerAccountList()}</div>
+      <button class="btn btn-primary" style="margin-top:8px" onclick="openAddViewerAccount()"><i class="fas fa-plus"></i> Add Details Search Account</button>
+    </div>`:''}
     <div class="card">
       <div class="card-title"><i class="fas fa-school"></i> School Information</div>
       <div class="form-group"><label>School Name</label><input id="siName" value="${SCHOOL.name}" readonly style="background:#f1f5f9"></div>
@@ -9396,6 +9333,8 @@ function renderSettings(){
           <option value="2027">2027</option><option value="2028">2028</option>
         </select>
       </div>
+      <div class="form-group"><label>Government Record Help / Office Contact Number</label><input id="siGovContact" value="${esc((ls('settings')||{}).govContactNumber||'')}" placeholder="e.g. 9800000000"></div>
+      <button class="btn btn-primary" onclick="saveGovContactNumber()"><i class="fas fa-save"></i> Save Contact Number</button>
     </div>
     <div class="card">
       <div class="card-title"><i class="fas fa-exclamation-triangle"></i> Academic Attention Thresholds</div>
@@ -9408,6 +9347,62 @@ function renderSettings(){
   </div>`;
 }
 
+function saveGovContactNumber(){
+  const settings=ls('settings')||{};
+  settings.govContactNumber=document.getElementById('siGovContact').value.trim();
+  ss('settings',settings);
+  toast('Government office contact number saved');
+}
+function renderViewerAccountList(){
+  const accts=(ls('users')||[]).filter(u=>u.role==='viewer');
+  if(!accts.length) return `<div style="font-size:12px;color:var(--text-muted)">No details-search accounts yet.</div>`;
+  return accts.map(u=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;background:#f8faff;border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:6px">
+      <div><div style="font-weight:700;font-size:13px">${esc(u.name)}</div><div style="font-size:11px;color:var(--text-muted)">Username: ${esc(u.username)}</div></div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-xs btn-outline" onclick="openAddViewerAccount('${u.id}')"><i class="fas fa-edit"></i></button>
+        <button class="btn btn-xs btn-danger" onclick="deleteViewerAccount('${u.id}')"><i class="fas fa-trash"></i></button>
+      </div>
+    </div>`).join('');
+}
+function openAddViewerAccount(editId){
+  const users=ls('users')||[];
+  const u=editId?users.find(x=>x.id===editId):{};
+  openModal(editId?'Edit Details Search Account':'Add Details Search Account',`
+    <div class="form-group"><label>Full Name *</label><input id="vaName" value="${esc(u.name||'')}" placeholder="e.g. Office Staff" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit"></div>
+    <div class="form-group"><label>Username *</label><input id="vaUser" value="${esc(u.username||'')}" placeholder="Login username" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit"></div>
+    <div class="form-group"><label>Password *</label><input id="vaPass" type="password" value="${esc(u.password||'')}" placeholder="Login password" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit"></div>
+  `,[
+    {label:editId?'Update':'Save',cls:'btn-primary',onclick:`saveViewerAccount('${editId||''}')`},
+    {label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}
+  ]);
+}
+function saveViewerAccount(editId){
+  const name=document.getElementById('vaName').value.trim();
+  const username=document.getElementById('vaUser').value.trim();
+  const password=document.getElementById('vaPass').value.trim();
+  if(!name||!username||!password){toast('Fill all fields','error');return}
+  const users=ls('users')||[];
+  if(editId){
+    const idx=users.findIndex(u=>u.id===editId);
+    if(idx>=0) users[idx]={...users[idx],name,username,password};
+  } else {
+    if(users.some(u=>u.username===username)){toast('Username already exists','error');return}
+    users.push({id:uid(),username,password,name,role:'viewer',active:true});
+  }
+  ss('users',users);
+  toast('Details search account saved ✅');
+  closeModal();
+  const activePage=document.querySelector('.nav-item.active')?.dataset.page;
+  showPage(activePage||'settings');
+}
+function deleteViewerAccount(id){
+  if(!confirm('Delete this details-search account?'))return;
+  ss('users',(ls('users')||[]).filter(u=>u.id!==id));
+  toast('Account deleted');
+  const activePage=document.querySelector('.nav-item.active')?.dataset.page;
+  showPage(activePage||'settings');
+}
 function saveFeeStructure(){
   const fs=ls('feeStructure')||{};
   fs.admissionFee=parseFloat(document.getElementById('fsAdm').value)||500;
@@ -11643,9 +11638,6 @@ function loadTeacherMarksAssignments(){
         <button class="btn btn-outline btn-sm" onclick="tmPrintTeacherSheet()"><i class="fas fa-print"></i> Print</button>
         <button class="btn btn-outline btn-sm" onclick="tmGenerateAllTeachers()"><i class="fas fa-users"></i> Generate for All Teachers</button>
       </div>
-      <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px;font-weight:600;color:#7c2d12">
-        <input type="checkbox" id="tmAutoCreateTask" checked> ☑ Create Task Automatically (adds a "Complete marks entry" task per class/subject for this teacher)
-      </label>
     </div>`;
   }
   loadTeacherMarksEntry();
@@ -12046,16 +12038,6 @@ function tmBuildCombinedWorkbook(){
   return {wb, teacherId, teacherName, term, termLabel, session, assignments};
 }
 
-function tmMaybeAutoCreateTasks(built){
-  if(!document.getElementById('tmAutoCreateTask')?.checked) return;
-  const dueDate = getMarksDeadline() || '';
-  built.assignments.forEach(a=>{
-    createOrLinkMarksTask(built.teacherId, built.teacherName, a.class, a.subject, built.term, dueDate);
-  });
-  toast(`📋 ${built.assignments.length} marks-entry task(s) created/updated for ${built.teacherName}`);
-  if(document.getElementById('tkListBody')) refreshTaskReportList();
-}
-
 function tmExportCombinedWorkbook(){
   const built = tmBuildCombinedWorkbook();
   if(!built) return null;
@@ -12063,7 +12045,6 @@ function tmExportCombinedWorkbook(){
   const fname = `${teacherName.replace(/\s/g,'_')}_Term${term}_${session}.xlsx`;
   XLSX.writeFile(wb, fname);
   toast('✅ Marks sheet downloaded — one tab per class/subject, plus an Instructions tab.');
-  tmMaybeAutoCreateTasks(built);
   return fname;
 }
 
@@ -12107,7 +12088,6 @@ async function tmSendCombinedViaWhatsApp(){
     toast('WhatsApp opened — the Excel file just downloaded, please attach it manually (a WhatsApp link cannot auto-attach files).');
   }
   window.open(`https://wa.me/91${teacher.phone}?text=${encodeURIComponent(msg)}`,'_blank');
-  tmMaybeAutoCreateTasks(built);
 }
 
 function tmSendReminder(teacherId, cls, subject){
@@ -13494,8 +13474,12 @@ function openStudentProfile(id){
       </div>
       <div class="text-xs text-muted mt-4">📱 ${s.phone||'—'} · 🎂 Age: ${age}y ${ageOk?'✅':'⚠️'}</div>
     </div>
-    <div style="flex-shrink:0">
-      <button class="btn btn-gold btn-sm" onclick="promoteStudent('${id}')"><i class="fas fa-level-up-alt"></i> Promote</button>
+    <div style="flex-shrink:0;display:flex;gap:6px;flex-wrap:wrap">
+      ${currentUser.role!=='viewer'?`
+        <button class="btn btn-primary btn-sm" onclick="openEditStudent('${id}')"><i class="fas fa-edit"></i> Edit Student</button>
+        <button class="btn btn-sm" style="background:#1a3a6b;color:white;border:none" onclick="openGovEditor('${id}')"><i class="fas fa-landmark"></i> Government Record</button>
+        <button class="btn btn-gold btn-sm" onclick="promoteStudent('${id}')"><i class="fas fa-level-up-alt"></i> Promote</button>
+      `:''}
     </div>
   </div>
 
@@ -13508,6 +13492,7 @@ function openStudentProfile(id){
     <button class="tab" onclick="switchProfileTab('pfAtt',this)">📅 Attendance</button>
     <button class="tab" onclick="switchProfileTab('pfHistory',this)">🎓 History</button>
     <button class="tab" onclick="switchProfileTab('pfTxn',this)">💳 Transactions</button>
+    <button class="tab" onclick="switchProfileTab('pfGov',this)">🏛 Government Record</button>
   </div>
   </div>
 
@@ -13519,6 +13504,20 @@ function openStudentProfile(id){
     ${s.address?`<div style="background:#f8faff;padding:9px 12px;border-radius:8px;border:1px solid var(--border);margin-top:8px"><div style="font-size:10px;color:var(--text-muted);font-weight:800;text-transform:uppercase">Address</div><div style="font-size:13px;font-weight:700;color:var(--primary-dark);margin-top:2px">${esc(s.address)}</div></div>`:''}
   </div>
 
+  <!-- GOVERNMENT RECORD TAB -->
+  <div id="pfGov" style="display:none">
+    ${(()=>{const rec=getGovRecord(id);return `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:6px 0 10px;flex-wrap:wrap;gap:8px">
+      <div>${govStatusBadge(rec.status)}</div>
+      ${currentUser.role!=='viewer'?`<button class="btn btn-sm btn-primary" onclick="closeModal();openGovEditor('${id}')"><i class="fas fa-edit"></i> Edit Government Record</button>`:''}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      ${[['School Student ID',s.studentId],['Government ID (Banglar Shiksha)',rec.banglarShikshaId||'—']].map(([l,v])=>`<div style="background:#f8faff;padding:9px 12px;border-radius:8px;border:1px solid var(--border)"><div style="font-size:10px;color:var(--text-muted);font-weight:800;text-transform:uppercase">${l}</div><div style="font-size:13px;font-weight:700;color:var(--primary-dark);margin-top:2px">${esc(String(v))}</div></div>`).join('')}
+    </div>
+    ${rec.remarks?`<div style="background:#f8faff;padding:9px 12px;border-radius:8px;border:1px solid var(--border);margin-top:8px"><div style="font-size:10px;color:var(--text-muted);font-weight:800;text-transform:uppercase">Remarks</div><div style="font-size:13px;font-weight:700;color:var(--primary-dark);margin-top:2px">${esc(rec.remarks)}</div></div>`:''}
+    `;})()}
+  </div>
+
   <!-- FEE TAB -->
   <div id="pfFee" style="display:none">
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;margin-top:6px">
@@ -13527,15 +13526,15 @@ function openStudentProfile(id){
       <div style="padding:10px;background:#f8faff;border-radius:10px;text-align:center"><div class="text-xs text-muted">Exam Fees</div><div style="font-weight:900;color:var(--primary);font-size:14px">${['Term 1','Term 2','Term 3'].filter(t=>(sf.exam||{})[t]?.paid).length}/3 paid</div></div>
     </div>
     <div class="month-grid">${monthChips}</div>
-    <div style="background:linear-gradient(135deg,#0d1f3c,#1a3a6b);border-radius:12px;padding:12px 14px;margin-top:10px;margin-bottom:10px">
+    <div style="background:linear-gradient(135deg,#0d1f3c,#1a3a6b);border-radius:12px;padding:12px 14px;margin-top:10px;margin-bottom:10px${currentUser.role==='viewer'?';display:none':''}">
       <div style="color:white;font-weight:800;font-size:13px;margin-bottom:4px">⚡ Full Year Package</div>
       <div style="font-size:11px;color:rgba(255,255,255,.7);margin-bottom:8px">Pay all pending monthly + exam fees in one click</div>
       <button class="btn btn-gold" style="width:100%" onclick="collectFullYearPayment('${id}')"><i class="fas fa-bolt"></i> Collect Full Year Payment</button>
     </div>
-    <div class="flex gap-8 flex-wrap">
+    ${currentUser.role!=='viewer'?`<div class="flex gap-8 flex-wrap">
       <button class="btn btn-primary btn-sm" onclick="closeModal();openCollectFee('${id}')"><i class="fas fa-rupee-sign"></i> Collect Fee</button>
       <button class="btn btn-success btn-sm" onclick="sendWhatsApp('due','${id}')"><i class="fab fa-whatsapp"></i> Send Due Notice</button>
-    </div>
+    </div>`:''}
   </div>
 
   <!-- MARKS TAB -->
@@ -13645,7 +13644,7 @@ function openStudentProfile(id){
   <div id="pfHistory" style="display:none">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;margin-top:4px">
       <div style="font-weight:800;color:var(--primary)">🎓 Academic History</div>
-      <button class="btn btn-primary btn-sm" onclick="addAcademicHistory('${id}')"><i class="fas fa-plus"></i> Add Year</button>
+      ${currentUser.role!=='viewer'?`<button class="btn btn-primary btn-sm" onclick="addAcademicHistory('${id}')"><i class="fas fa-plus"></i> Add Year</button>`:''}
     </div>
     <div style="background:#fffbeb;border-radius:10px;padding:10px 12px;margin-bottom:12px;border:1.5px solid #fde68a">
       <div style="font-size:10px;font-weight:800;color:#92400e;text-transform:uppercase">Current Year</div>
@@ -13665,7 +13664,7 @@ function openStudentProfile(id){
           ${h.result?`<span class="badge ${h.result==='Passed'||h.result==='Promoted'?'badge-success':'badge-danger'}">${h.result}</span>`:''}
         </div>
         ${h.remarks?`<div style="font-size:11px;color:var(--text-muted);margin-top:5px;font-style:italic">"${esc(h.remarks)}"</div>`:''}
-        <button class="btn btn-xs btn-outline" style="margin-top:6px" onclick="removeAcademicHistory('${id}',${i})"><i class="fas fa-trash"></i> Remove</button>
+        ${currentUser.role!=='viewer'?`<button class="btn btn-xs btn-outline" style="margin-top:6px" onclick="removeAcademicHistory('${id}',${i})"><i class="fas fa-trash"></i> Remove</button>`:''}
       </div>
     </div>`).join(''):`<div style="text-align:center;padding:24px;color:var(--text-muted)"><div style="font-size:32px;margin-bottom:6px">📚</div><div style="font-weight:700">No history recorded yet</div><div style="font-size:12px;margin-top:4px">Click "Add Year" to record previous class data.</div></div>`}
   </div>
@@ -17718,7 +17717,7 @@ function saveEditStudent(id){
   };
   ss('students', students);
   closeModal();
-  toast(`✅ ${name} updated successfully!`);
+  toast(`✅ Student details updated successfully.`);
   showPage('students');
 }
 
@@ -18874,7 +18873,7 @@ function clearAllExams(){
 
 // switchProfileTab — robust version handles all 7 tabs
 function switchProfileTab(tabId, btn){
-  ['pfBasic','pfFee','pfMarks','pfPerf','pfAtt','pfHistory','pfTxn'].forEach(t=>{
+  ['pfBasic','pfFee','pfMarks','pfPerf','pfAtt','pfHistory','pfTxn','pfGov'].forEach(t=>{
     const el=document.getElementById(t);
     if(el) el.style.display='none';
   });
