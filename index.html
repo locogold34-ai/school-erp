@@ -9123,8 +9123,9 @@ function cloudPushKey(key){
   clearTimeout(_sbPushTimers[key]);
   _sbPushTimers[key]=setTimeout(async ()=>{
     try{
-      updateCloudSyncIndicator('syncing');
       const value=ls(key);
+      if(value===null||value===undefined) return; // nothing to store yet
+      updateCloudSyncIndicator('syncing');
       const { error } = await _sbClient.from('erp_sync').upsert(
         {key,value,origin:_sbOrigin,owner:_sbUser.id,updated_at:new Date().toISOString()},
         {onConflict:'key'}
@@ -9142,7 +9143,9 @@ async function cloudPushAll(){
   if(!_sbClient||!_sbUser){ toast('Not connected to Cloud Sync','error'); return; }
   updateCloudSyncIndicator('syncing');
   try{
-    const rows=CLOUD_SYNC_KEYS.map(key=>({key,value:ls(key),origin:_sbOrigin,owner:_sbUser.id,updated_at:new Date().toISOString()}));
+    const rows=CLOUD_SYNC_KEYS
+      .map(key=>({key,value:ls(key),origin:_sbOrigin,owner:_sbUser.id,updated_at:new Date().toISOString()}))
+      .filter(r=>r.value!==null&&r.value!==undefined); // skip keys with no local data yet
     const { error } = await _sbClient.from('erp_sync').upsert(rows,{onConflict:'key'});
     if(error) throw error;
     toast('☁️ Backed up to Cloud');
