@@ -3196,7 +3196,7 @@ function renderGovClassRecords(){
   <div style="background:white;border-radius:14px;border:1.5px solid #e8eef5;overflow-x:auto">
     ${!visibleRows.length?emptyState('📭','No students in this category',filter?'Try clearing the filter above':'No students found'):`
     <table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px">
-      <thead><tr style="background:#f8faff;text-align:left">
+      <thead><tr style="background:#1a3a6b;text-align:left;color:white">
         <th style="padding:9px 10px">Roll</th><th style="padding:9px 10px">Student Name</th><th style="padding:9px 10px">Phone</th>
         <th style="padding:9px 10px">Government ID</th>
         <th style="padding:9px 10px">Status</th><th style="padding:9px 10px">Remarks</th><th style="padding:9px 10px">Action</th>
@@ -3344,7 +3344,7 @@ function renderGovFollowUp(){
   <div style="font-size:20px;font-weight:900;color:#0d1f3c;margin-bottom:16px">⚠️ Form Not Submitted — Follow-up</div>
   <div style="background:white;border-radius:14px;border:1.5px solid #e8eef5;overflow-x:auto">
     <table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px">
-      <thead><tr style="background:#f8faff;text-align:left">
+      <thead><tr style="background:#1a3a6b;text-align:left;color:white">
         <th style="padding:10px 12px">Student</th><th style="padding:10px 12px">Class</th><th style="padding:10px 12px">Roll</th>
         <th style="padding:10px 12px">Phone</th><th style="padding:10px 12px">Action</th>
       </tr></thead>
@@ -3437,7 +3437,7 @@ function renderGovAgeVerification(){
   <div style="background:white;border-radius:14px;border:1.5px solid #e8eef5;overflow-x:auto">
     ${!visible.length?emptyState('📭','No students in this category','Try a different filter'):`
     <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1100px">
-      <thead><tr style="background:#f8faff;text-align:left">
+      <thead><tr style="background:#1a3a6b;text-align:left;color:white">
         <th style="padding:8px 9px">Roll</th><th style="padding:8px 9px">Student</th><th style="padding:8px 9px">Phone</th>
         <th style="padding:8px 9px">DOB</th><th style="padding:8px 9px">Age (on 1 Jan)</th><th style="padding:8px 9px">School Class</th>
         <th style="padding:8px 9px">Govt. Age Class</th><th style="padding:8px 9px">Government ID</th>
@@ -14555,79 +14555,58 @@ function printReceiptV5(receiptId){
   const admTotal=getEffectiveFee(r.studentId,'admission',s.class);
   const admPaid=sf.admissionPaid||0; const admRemain=Math.max(0,admTotal-admPaid);
   const receiptNo='RCP-'+r.id.slice(-8).toUpperCase();
-  const printDate=new Date(r.date).toLocaleDateString('en-IN',{day:'2-digit',month:'long',year:'numeric'});
+  const printDate=new Date(r.date).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+  const printTime=new Date(r.date).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+  const balanceLine = r.type==='Admission'&&admRemain>0
+    ? `<div class="row"><span>Admission Balance Due</span><span class="bold">₹${admRemain}</span></div>`
+    : r.remaining>0
+      ? `<div class="row"><span>Balance Due</span><span class="bold">₹${r.remaining}</span></div>`
+      : `<div class="center bold" style="margin-top:4px">*** FULLY PAID ***</div>`;
   const w=window.open('','_blank');
   w.document.write(`<!DOCTYPE html><html><head><title>Fee Receipt — ${s.name||''}</title>
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
   <style>
-    @page{size:A5;margin:10mm 12mm}
+    @page{size:80mm auto;margin:0}
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:'Nunito',sans-serif;background:white;color:#1a2740;font-size:12px}
-    .rc-outer{border:2px solid #1a3a6b;border-radius:10px;overflow:hidden;max-width:100%}
-    .rc-hdr{background:linear-gradient(135deg,#0d1f3c,#1a3a6b);padding:14px 18px;color:white;display:flex;align-items:center;gap:12px}
-    .rc-logo{width:44px;height:44px;background:linear-gradient(135deg,#9a7b30,#f0c040);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
-    .rc-sname{font-family:'Playfair Display',serif;font-size:15px;font-weight:800}
-    .rc-saddr{font-size:9px;color:rgba(255,255,255,.7);margin-top:2px}
-    .rc-badge{margin-left:auto;background:rgba(255,255,255,.15);color:#f0c040;font-size:10px;font-weight:800;padding:4px 10px;border-radius:14px;white-space:nowrap}
-    .meta{background:#f0f4ff;padding:8px 16px;display:flex;justify-content:space-between;font-size:10px;border-bottom:1px solid #d0dbe8}
-    .section{padding:12px 16px;border-bottom:1px solid #e2e8f0}
-    .section-label{font-size:9px;color:#6b7a99;font-weight:800;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px}
-    .info-row{display:flex;padding:3px 0}
-    .info-key{color:#6b7a99;width:42%;font-size:11px}
-    .info-val{font-weight:700;font-size:11px;color:#1a3a6b;flex:1}
-    .paid-box{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:#f0fdf4;border-radius:8px;margin-bottom:6px}
-    .paid-label{font-size:13px;font-weight:800;color:#15803d}
-    .paid-amt{font-size:22px;font-weight:900;color:#15803d}
-    .due-box{display:flex;justify-content:space-between;align-items:center;padding:8px 14px;background:#fee2e2;border-radius:8px}
-    .due-label{font-size:11px;font-weight:700;color:#b91c1c}
-    .due-amt{font-size:15px;font-weight:900;color:#b91c1c}
-    .clear-box{padding:7px;background:#dcfce7;border-radius:8px;text-align:center;font-size:10px;color:#15803d;font-weight:700}
-    .sig-row{padding:12px 16px;display:flex;justify-content:space-between;align-items:flex-end}
-    .sig-box{text-align:center}
-    .sig-line{border-top:1.5px solid #1a3a6b;width:110px;margin:22px auto 4px}
-    .sig-name{font-size:9px;color:#6b7a99;font-weight:700}
-    .seal{width:44px;height:44px;border:1.5px dashed #d0dbe8;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;color:#d0dbe8;text-align:center}
-    .footer{background:#f0f4ff;padding:6px;text-align:center;font-size:9px;color:#6b7a99}
+    body{width:76mm;margin:0 auto;font-family:'Courier New',Consolas,monospace;font-size:11px;line-height:1.4;color:#000;padding:3mm 3mm 6mm}
+    .center{text-align:center}
+    .bold{font-weight:700}
+    .big{font-size:15px;font-weight:800}
+    .school-name{font-size:14px;font-weight:800;letter-spacing:.3px}
+    .school-addr{font-size:9px;margin-top:1px}
+    .tag{font-size:11px;font-weight:800;letter-spacing:1px;margin-top:3px}
+    .line{border-top:1px dashed #000;margin:5px 0}
+    .row{display:flex;justify-content:space-between;gap:6px;margin:1.5px 0}
+    .row span:first-child{color:#000}
+    .row span:last-child{font-weight:700;text-align:right}
+    .small{font-size:9px}
+    .footer{margin-top:8px;font-size:9px}
+    @media print{body{width:76mm}}
   </style></head><body>
-  <div class="rc-outer">
-    <div class="rc-hdr">
-      <div class="rc-logo">🎓</div>
-      <div>
-        <div class="rc-sname">Children's Paradise School</div>
-        <div class="rc-saddr">Uttar Radhanagar, Magrahat, South 24 Parganas, West Bengal</div>
-      </div>
-      <div class="rc-badge">FEE RECEIPT</div>
+    <div class="center">
+      <div class="school-name">Children's Paradise School</div>
+      <div class="school-addr">Uttar Radhanagar, Magrahat<br>South 24 Parganas, West Bengal</div>
+      <div class="tag">FEE RECEIPT</div>
     </div>
-    <div class="meta">
-      <span><strong>Receipt No:</strong> ${receiptNo}</span>
-      <span><strong>Date:</strong> ${printDate}</span>
-    </div>
-    <div class="section">
-      <div class="section-label">Student Information</div>
-      <div class="info-row"><div class="info-key">Name</div><div class="info-val">${esc(s.name||'—')}</div></div>
-      <div class="info-row"><div class="info-key">Father's Name</div><div class="info-val">${esc(s.fatherName||'—')}</div></div>
-      <div class="info-row"><div class="info-key">Class / Roll</div><div class="info-val">${esc(s.class||'—')} / ${s.roll||'—'}</div></div>
-      <div class="info-row"><div class="info-key">Student ID</div><div class="info-val">${s.studentId||'—'}</div></div>
-      <div class="info-row"><div class="info-key">Session</div><div class="info-val">${s.session||'—'}</div></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Payment Details</div>
-      <div class="info-row"><div class="info-key">Fee Type</div><div class="info-val"><strong>${r.type} Fee</strong></div></div>
-      <div class="info-row"><div class="info-key">Description</div><div class="info-val">${esc(r.desc)}</div></div>
-      ${r.months&&r.months.length?`<div class="info-row"><div class="info-key">Months</div><div class="info-val">${r.months.map(m=>MONTHS[m]).join(', ')}</div></div>`:''}
-      <div class="info-row"><div class="info-key">Payment Mode</div><div class="info-val">${r.mode}</div></div>
-    </div>
-    <div class="section">
-      <div class="section-label">Amount Summary</div>
-      <div class="paid-box"><span class="paid-label">Amount Paid</span><span class="paid-amt">₹${r.amount}</span></div>
-      ${r.type==='Admission'&&admRemain>0?`<div class="due-box"><span class="due-label">Admission Balance Due</span><span class="due-amt">₹${admRemain}</span></div>`:r.remaining>0?`<div class="due-box"><span class="due-label">Balance Due</span><span class="due-amt">₹${r.remaining}</span></div>`:'<div class="clear-box">✓ Fully Paid</div>'}
-    </div>
-    <div class="sig-row">
-      <div class="sig-box"><div class="sig-line"></div><div class="sig-name">Receiver's Signature</div></div>
-      <div style="text-align:center"><div style="font-size:9px;color:#6b7a99;margin-bottom:4px">School Seal</div><div class="seal">SEAL</div></div>
-    </div>
-    <div class="footer">Thank you for your payment &nbsp;·&nbsp; Computer-generated receipt</div>
-  </div>
+    <div class="line"></div>
+    <div class="row"><span>Receipt No</span><span>${receiptNo}</span></div>
+    <div class="row"><span>Date</span><span>${printDate} ${printTime}</span></div>
+    <div class="line"></div>
+    <div class="row"><span>Name</span><span>${esc(s.name||'—')}</span></div>
+    <div class="row"><span>Father</span><span>${esc(s.fatherName||'—')}</span></div>
+    <div class="row"><span>Class/Roll</span><span>${esc(s.class||'—')} / ${s.roll||'—'}</span></div>
+    <div class="row"><span>Student ID</span><span>${s.studentId||'—'}</span></div>
+    <div class="row"><span>Session</span><span>${s.session||'—'}</span></div>
+    <div class="line"></div>
+    <div class="row"><span>Fee Type</span><span>${r.type} Fee</span></div>
+    <div class="row small"><span>Desc</span><span>${esc(r.desc)}</span></div>
+    ${r.months&&r.months.length?`<div class="row small"><span>Months</span><span>${r.months.map(m=>MONTHS[m]).join(', ')}</span></div>`:''}
+    <div class="row"><span>Mode</span><span>${r.mode}</span></div>
+    <div class="line"></div>
+    <div class="row big"><span>AMOUNT PAID</span><span>₹${r.amount}</span></div>
+    ${balanceLine}
+    <div class="line"></div>
+    <div class="center small">Received by: ______________</div>
+    <div class="center footer">Thank you for your payment<br>Computer-generated receipt</div>
   </body></html>`);
   w.document.close(); w.focus(); setTimeout(()=>{w.print();w.close();},500);
 }
