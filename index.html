@@ -1343,6 +1343,59 @@ function ss(k,v){
 function uid(){return 'id_'+Date.now()+'_'+Math.random().toString(36).slice(2,7)}
 function today(){return new Date().toISOString().split('T')[0]}
 function fmtDate(d){if(!d)return '-';const dt=new Date(d);return dt.toLocaleDateString('en-IN')}
+// dd/mm/yyyy <-> ISO (yyyy-mm-dd) helpers for the Date of Birth fields
+function dobDMYToISO(str){
+  const m=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec((str||'').trim());
+  if(!m) return '';
+  const dd=+m[1], mm=+m[2], yyyy=+m[3];
+  if(mm<1||mm>12||dd<1||dd>31||yyyy<1900) return '';
+  const d=new Date(yyyy,mm-1,dd);
+  if(d.getFullYear()!==yyyy||d.getMonth()!==mm-1||d.getDate()!==dd) return '';
+  return `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+}
+function dobISOToDMY(iso){
+  if(!iso) return '';
+  const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if(!m) return '';
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+function formatDobInput(el){
+  let v=el.value.replace(/[^\d]/g,'').slice(0,8);
+  let out=v;
+  if(v.length>4) out=v.slice(0,2)+'/'+v.slice(2,4)+'/'+v.slice(4);
+  else if(v.length>2) out=v.slice(0,2)+'/'+v.slice(2);
+  el.value=out;
+}
+// Returns the "Age on 1 Jan <year> · Government-suggested class" info line, or an error/empty string
+function dobInfoHTML(iso){
+  if(!iso) return '';
+  const sessionYear=parseInt(getActiveSession())||new Date().getFullYear();
+  const age=ageAsOfJan1(iso,sessionYear);
+  if(age===null) return '';
+  const rules=getGovAgeRules();
+  const r=rules.find(rr=>age>=rr.minAge&&age<rr.maxAge);
+  if(r){
+    return `Age on 1 Jan ${sessionYear}: <b>${age} years</b> &nbsp;·&nbsp; Government-suggested admission: <b style="color:#15803d">${esc(r.govClass)}</b>${(r.schoolClasses&&r.schoolClasses.length)?` (school class: ${esc(r.schoolClasses.join(' / '))})`:''}`;
+  }
+  return `Age on 1 Jan ${sessionYear}: <b>${age} years</b> &nbsp;·&nbsp; <span style="color:#b45309">No matching government age-class rule for this age — check Age & Government Class Verification settings.</span>`;
+}
+// Wires a DD/MM/YYYY display field (id=`${prefix}DobDisplay`) to a hidden ISO field (id=`${prefix}Dob`) and an info line (id=`${prefix}DobInfo`)
+function handleDobChange(prefix){
+  const disp=document.getElementById(prefix+'DobDisplay');
+  const hidden=document.getElementById(prefix+'Dob');
+  const info=document.getElementById(prefix+'DobInfo');
+  if(!disp||!hidden) return;
+  const val=disp.value.trim();
+  if(!val){ hidden.value=''; if(info) info.innerHTML=''; return; }
+  const iso=dobDMYToISO(val);
+  if(!iso){
+    hidden.value='';
+    if(info) info.innerHTML='<span style="color:#b91c1c">Enter a valid date as DD/MM/YYYY</span>';
+    return;
+  }
+  hidden.value=iso;
+  if(info) info.innerHTML=dobInfoHTML(iso);
+}
 function calcAge(dob){if(!dob)return 0;const d=new Date(dob),n=new Date();let a=n.getFullYear()-d.getFullYear();if(n.getMonth()<d.getMonth()||(n.getMonth()===d.getMonth()&&n.getDate()<d.getDate()))a--;return a}
 function toast(msg,type='success'){
   let t=document.createElement('div');
@@ -17598,7 +17651,9 @@ function openAddStudent(){
   </div>
   <div class="form-row">
     <div class="form-group"><label>Date of Birth</label>
-      <input id="asDob" type="date" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+      <input id="asDobDisplay" type="text" inputmode="numeric" placeholder="DD/MM/YYYY" maxlength="10" oninput="formatDobInput(this)" onchange="handleDobChange('as')" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+      <input id="asDob" type="hidden" value="">
+      <div id="asDobInfo" style="margin-top:6px;font-size:11.5px;color:#1a3a6b"></div>
     </div>
     <div class="form-group"><label>Gender</label>
       <select id="asGender" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
@@ -17645,6 +17700,7 @@ function saveNewStudent(){
 
   if(!name){ errEl.style.display='block'; errEl.textContent='Student name is required.'; return; }
   if(!roll){ errEl.style.display='block'; errEl.textContent='Roll number is required.'; return; }
+  if(document.getElementById('asDobDisplay').value.trim() && !dob){ errEl.style.display='block'; errEl.textContent='Date of Birth must be a valid date in DD/MM/YYYY format.'; return; }
 
   const students = ls('students')||[];
   // Check duplicate roll in same class+session
@@ -17709,7 +17765,9 @@ function openEditStudent(id){
   </div>
   <div class="form-row">
     <div class="form-group"><label>Date of Birth</label>
-      <input id="esDob" type="date" value="${s.dob||''}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+      <input id="esDobDisplay" type="text" inputmode="numeric" placeholder="DD/MM/YYYY" maxlength="10" value="${s.dob?dobISOToDMY(s.dob):''}" oninput="formatDobInput(this)" onchange="handleDobChange('es')" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+      <input id="esDob" type="hidden" value="${s.dob||''}">
+      <div id="esDobInfo" style="margin-top:6px;font-size:11.5px;color:#1a3a6b">${dobInfoHTML(s.dob||'')}</div>
     </div>
     <div class="form-group"><label>Gender</label>
       <select id="esGender" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
