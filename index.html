@@ -1343,6 +1343,205 @@ function ss(k,v){
 function uid(){return 'id_'+Date.now()+'_'+Math.random().toString(36).slice(2,7)}
 function today(){return new Date().toISOString().split('T')[0]}
 function fmtDate(d){if(!d)return '-';const dt=new Date(d);return dt.toLocaleDateString('en-IN')}
+const RELIGION_OPTIONS=['Hinduism','Islam','Christianity','Sikhism','Buddhism','Other'];
+const CATEGORY_OPTIONS=['General','SC','ST','OBC','Minority'];
+function religionSelectHTML(id,current){
+  return `<select id="${id}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+    <option value="">Select</option>
+    ${RELIGION_OPTIONS.map(r=>`<option ${current===r?'selected':''}>${r}</option>`).join('')}
+  </select>`;
+}
+function categorySelectHTML(id,current){
+  return `<select id="${id}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+    <option value="">Select</option>
+    ${CATEGORY_OPTIONS.map(c=>`<option ${current===c?'selected':''}>${c}</option>`).join('')}
+  </select>`;
+}
+function isValidPhone10(v){ return /^\d{10}$/.test(v); }
+function digitsOnlyInput(el,max){ el.value=el.value.replace(/[^\d]/g,'').slice(0,max); }
+const BLOOD_GROUP_OPTIONS=['A+','A-','B+','B-','AB+','AB-','O+','O-','Unknown'];
+const MOTHER_TONGUE_OPTIONS=['Bengali','Hindi','English','Urdu','Santali','Other'];
+const MEDIUM_OPTIONS=['Bengali','English','Hindi','Other'];
+const RELATIONSHIP_OPTIONS=['Father','Mother','Grandfather','Grandmother','Uncle','Aunt','Legal Guardian','Other'];
+function simpleSelectHTML(id,options,current,placeholder){
+  return `<select id="${id}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+    <option value="">${placeholder||'Select'}</option>
+    ${options.map(o=>`<option ${current===o?'selected':''}>${o}</option>`).join('')}
+  </select>`;
+}
+// Generic DD/MM/YYYY text field -> hidden ISO field sync (used for Admission Date etc.; DOB uses handleDobChange for the extra age line)
+function syncDMYToHidden(displayId,hiddenId){
+  const disp=document.getElementById(displayId);
+  const hidden=document.getElementById(hiddenId);
+  if(!disp||!hidden) return;
+  hidden.value=dobDMYToISO(disp.value.trim());
+}
+
+// ===========================
+//  GOVERNMENT (BANGLAR SHIKSHA / UDISE+) STUDENT FORM — option lists + field schema
+// ===========================
+const YES_NO_OPTIONS=['YES','NO'];
+const GENDER_OPTIONS_GOV=['BOYS','GIRLS','TRANSGENDER'];
+const SOCIAL_CATEGORY_GOV=['GENERAL','SC','ST','OBC-A','OBC-B'];
+const RELIGION_GOV=['HINDU','MUSLIM','CHRISTIAN','SIKH','BUDDHIST','PARSI','JAIN','OTHERS'];
+const NATIONALITY_GOV=['INDIAN','OTHER'];
+const BLOOD_GROUP_GOV=['A+','A-','B+','B-','AB+','AB-','O+','O-'];
+const RELATIONSHIP_GOV=['FATHER','MOTHER','OTHER'];
+const ANNUAL_INCOME_GOV=['0-50,000','50,001-1,20,000','1,20,001-2,50,000','2,50,000-5,00,000','Above 5,00,000'];
+const GUARDIAN_QUALIFICATION_GOV=['GRADUATE','BELOW GRADUATE','POST GRADUATE','NO SCHOOL EXPERIENCE'];
+const PREV_YEAR_STATUS_GOV=['Anganwadi/ ECCE Centre','None/Not Studying','Studied at Current/Same School','Studied at Other School'];
+const ADMITTED_UNDER_GOV=['None','Section 12 of the RTE','EWS','Persons with Disabilities (PwD)','Disadvantaged Group','Others'];
+const MEDIUM_GOV=['BENGALI'];
+const ADMISSION_TYPE_GOV=['FIRST TIME ADMISSION','NEW ADMISSION WITH TC/ SLC'];
+const HOMELESS_GOV=['NOT APPLICABLE','HOMELESS AND STAYING ON STREETS WITH PARENT/GUARDIAN (NOT STAYING IN HOME)','HOMELESS AND STAYING ON STREETS WITHOUT ADULT PROTECTION'];
+const COUNTRY_GOV=['BANGLADESH','BHUTAN','INDIA','NEPAL'];
+const STATE_GOV=['ANDAMAN AND NICOBAR','ANDHRA PRADESH','ARUNACHAL PRADESH','ASSAM','BIHAR','CHANDIGARH','CHHATTISGARH','DADRA AND NAGAR HAVELI','DAMAN AND DIU','DELHI','GOA','GUJARAT','HARYANA','HIMACHAL PRADESH','JAMMU AND KASHMIR','JHARKHAND','KARNATAKA','KERALA','LAKSHADWEEP','MADHYA PRADESH','MAHARASHTRA','MANIPUR','MEGHALAYA','MIZORAM','NAGALAND','ORISSA','OTHER','PONDICHERRY','PUNJAB','RAJASTHAN','SIKKIM','TAMIL NADU','TRIPURA','UTTARAKHAND','UTTAR PRADESH','WEST BENGAL'];
+const DISTRICT_GOV_WB=['ALIPURDUAR','BANKURA','BIRBHUM','COOCH BEHAR','DAKSHIN DINAJPUR','DARJILING','HOOGHLY','HOWRAH','JALPAIGURI','JHARGRAM','KALIMPONG','KOLKATA','MALDAH','MURSHIDABAD','NADIA','NORTH TWENTY FOUR PARGANAS','PASCHIM BARDHAMAN','PASCHIM MEDINIPUR','PURBA BARDHAMAN','PURBA MEDINIPUR','PURULIYA','SILIGURI','SOUTH TWENTY FOUR PARGANAS','UTTAR DINAJPUR'];
+const MOTHER_TONGUE_GOV=['BENGALI','ASSAMESE','GUJARATI','HINDI','KANNADA','KASHMIRI','KONKANI','MALAYALAM','MANIPURI','MARATHI','NEPALI','ORIYA','PUNJABI','SANSKRIT','SINDHI','TAMIL','TELUGU','URDU','ENGLISH','BODO','MISING','DOGRI','KHASI','GARO','MIZO','BHUTIA','LEPCHA','LIMBOO','FRENCH','SANTHALI','MAITHILI','ANGAMI','AO','ARABIC','BHOTI','BODHI','GERMAN','KAKBARAK','KONYAK','LADDAKHI','LOTHA','NICOBAREE','ORIYA (LOWER)','PERSIAN','PORTUGUESE','RAJASTHANI','RUSSIAN','SEMA','SPANISH','TIBETAN','ZELIANG','MUNDA','KUI','KUVI','ZUANGO','KISSAN','ORAM','SAURA','OTHER LANGUAGES'];
+const SECTION_GOV=['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','NOT APPLICABLE'];
+
+const DISTRICT_LIST_WB=['ALIPURDUAR','BANKURA','BIRBHUM','COOCHBEHAR','DAKSHIN DINAJPUR','DARJILING','HOOGHLY','HOWRAH','JALPAIGURI','JHARGRAM','KALIMPONG','KOLKATA','MALDAH','MURSHIDABAD','NADIA','NORTH TWENTY FOUR PARGANAS','PASCHIM BARDHAMAN','PASCHIM MEDINIPUR','PURBA BARDHAMAN','PURBA MEDINIPUR','PURULIYA','SILIGURI','SOUTH TWENTY FOUR PARGANAS','UTTAR DINAJPUR'];
+const DISTRICT_BLOCKS_WB={
+  'ALIPURDUAR':['Madarihat-Birpara','Kalchini','Kumargram','Alipurduar I','Alipurduar II','Falakata'],
+  'BANKURA':['Saltora','Mejia','Gangajalghati','Chhatna','Bankura I','Bankura II','Barjora','Onda','Indas','Joypur','Patrasayer','Kotulpur','Sonamukhi','Bishnupur','Indpur','Ranibandh','Khatra','Hirbandh','Raipur','Sarenga','Simlapal','Taldangra'],
+  'BIRBHUM':['Murarai I','Murarai II','Nalhati I','Nalhati II','Rampurhat I','Rampurhat II','Mayureswar I','Mayureswar II','Mohammad Bazar','Rajnagar','Suri I','Suri II','Sainthia','Dubrajpur','Khoyrasol','Bolpur Sriniketan','Ilambazar','Labpur','Nanoor'],
+  'COOCHBEHAR':['Cooch Behar I','Cooch Behar II','Dinhata I','Dinhata II','Sitai','Sitalkuchi','Mathabhanga I','Mathabhanga II','Tufanganj I','Tufanganj II','Mekhliganj','Haldibari'],
+  'DAKSHIN DINAJPUR':['Balurghat','Hili','Kumarganj','Tapan','Bansihari','Gangarampur','Harirampur','Kushmandi'],
+  'DARJILING':['Darjeeling Pulbazar','Rangli Rangliot','Jorebunglow Sukhiapokhri','Kurseong','Mirik'],
+  'HOOGHLY':['Arambagh','Khanakul I','Khanakul II','Goghat I','Goghat II','Pursurah','Haripal','Singur','Tarakeswar','Balagarh','Chinsurah Mogra','Dhaniakhali','Pandua','Polba Dadpur','Chanditala I','Chanditala II','Jangipara','Sreerampur Uttarpara'],
+  'HOWRAH':['Bally Jagachha','Domjur','Panchla','Sankrail','Jagatballavpur','Uluberia I','Uluberia II','Amta I','Amta II','Udaynarayanpur','Bagnan I','Bagnan II','Shyampur I','Shyampur II'],
+  'JALPAIGURI':['Rajganj','Jalpaiguri','Maynaguri','Dhupguri','Mal','Matiali','Nagrakata'],
+  'JHARGRAM':['Binpur I','Binpur II','Gopiballavpur I','Gopiballavpur II','Jamboni','Jhargram','Nayagram','Sankrail'],
+  'KALIMPONG':['Kalimpong I','Kalimpong II','Gorubathan'],
+  'KOLKATA':['Kolkata Municipal Corporation'],
+  'MALDAH':['Gazole','Bamangola','Habibpur','Old Malda','English Bazar','Manikchak','Kaliachak I','Kaliachak II','Kaliachak III','Harishchandrapur I','Harishchandrapur II','Chanchal I','Chanchal II','Ratua I','Ratua II'],
+  'MURSHIDABAD':['Farakka','Samserganj','Suti I','Suti II','Raghunathganj I','Raghunathganj II','Sagardighi','Murshidabad-Jiaganj','Bhagawangola I','Bhagawangola II','Lalgola','Nabagram','Berhampore','Beldanga I','Beldanga II','Hariharpara','Naoda','Kandi','Khargram','Burwan','Bharatpur I','Bharatpur II','Domkal','Raninagar I','Raninagar II','Jalangi'],
+  'NADIA':['Karimpur I','Karimpur II','Tehatta I','Tehatta II','Kaliganj','Nakashipara','Chapra','Krishnanagar I','Krishnanagar II','Nabadwip','Krishnaganj','Hanskhali','Santipur','Ranaghat I','Ranaghat II','Chakdaha','Haringhata'],
+  'NORTH TWENTY FOUR PARGANAS':['Amdanga','Deganga','Barasat I','Barasat II','Habra I','Habra II','Rajarhat','Baduria','Basirhat I','Basirhat II','Haroa','Hasnabad','Hingalganj','Minakhan','Sandeshkhali I','Sandeshkhali II','Swarupnagar','Bagdah','Bangaon','Gaighata','Barrackpore I','Barrackpore II'],
+  'PASCHIM BARDHAMAN':['Andal','Faridpur Durgapur','Kanksa','Pandabeswar','Barabani','Jamuria','Raniganj','Salanpur'],
+  'PASCHIM MEDINIPUR':['Garhbeta I','Garhbeta II','Garhbeta III','Keshpur','Midnapore Sadar','Salboni','Chandrakona I','Chandrakona II','Daspur I','Daspur II','Ghatal','Dantan I','Dantan II','Debra','Keshiari','Kharagpur I','Kharagpur II','Mohanpur','Narayangarh','Pingla','Sabang'],
+  'PURBA BARDHAMAN':['Ausgram I','Ausgram II','Bhatar','Burdwan I','Burdwan II','Galsi I','Galsi II','Khandaghosh','Raina I','Raina II','Jamalpur','Memari I','Memari II','Kalna I','Kalna II','Manteswar','Purbasthali I','Purbasthali II','Katwa I','Katwa II','Ketugram I','Ketugram II','Mongalkote'],
+  'PURBA MEDINIPUR':['Tamluk','Sahid Matangini','Panskura I','Panskura II','Nandakumar','Chandipur','Moyna','Mahishadal','Nandigram I','Nandigram II','Sutahata','Haldia','Contai I','Contai II','Contai III','Khejuri I','Khejuri II','Ramnagar I','Ramnagar II','Bhagabanpur I','Bhagabanpur II','Egra I','Egra II','Patashpur I','Patashpur II'],
+  'PURULIYA':['Arsha','Balarampur','Hura','Purulia I','Purulia II','Barabazar','Bandwan','Manbazar I','Manbazar II','Puncha','Baghmundi','Jhalda I','Jhalda II','Joypur','Para','Raghunathpur I','Raghunathpur II','Neturia','Santuri','Kashipur'],
+  'SILIGURI':['Matigara','Naxalbari','Phansidewa','Kharibari'],
+  'SOUTH TWENTY FOUR PARGANAS':['Baruipur','Basanti','Bhangore-I','Bhangore-II','Bishnupur-I','Bishnupur-II','Budge Budge-I','Budge Budge-II','Canning-I','Canning-II','Diamond Harbour-I','Diamond Harbour-II','Falta','Gosaba','Joynagar-I','Joynagar-II','Kakdwip','Kulpi','Kultali','Magrahat-I','Magrahat-II','Mandirbazar','Mathurapur-I','Mathurapur-II','Namkhana','Pathar Pratima','Sagar','Sonarpur','Thakurpukur Maheshtala'],
+  'UTTAR DINAJPUR':['Raiganj','Hemtabad','Kaliaganj','Itahar','Chopra','Islampur','Goalpokhar I','Goalpokhar II','Karandighi']
+};
+function blockOptionsForDistrict(district){ return DISTRICT_BLOCKS_WB[district]||[]; }
+function refreshBlockOptions(prefix){
+  const distSel=document.getElementById(prefix+'District');
+  const blockSel=document.getElementById(prefix+'Block');
+  if(!distSel||!blockSel) return;
+  const opts=blockOptionsForDistrict(distSel.value);
+  const prevVal=blockSel.value;
+  blockSel.innerHTML='<option value="">Select</option>'+opts.map(o=>`<option ${o===prevVal?'selected':''}>${o}</option>`).join('');
+  if(!opts.includes(prevVal)) blockSel.value='';
+}
+
+// section: S=Student Information, F=Family Information, AD=Address, AM=Admission Details
+const STUDENT_FIELD_SCHEMA=[
+  {section:'S',key:'dob',label:'Date of Birth',type:'dob',required:true},
+  {section:'S',key:'gender',label:'Gender',type:'select',options:['Male','Female','Other'],required:true},
+  {section:'S',key:'aadhaar',label:'Aadhaar Number (if available)',type:'aadhaar',required:false},
+  {section:'S',key:'category',label:'Category',type:'select',options:CATEGORY_OPTIONS,required:true},
+  {section:'S',key:'religion',label:'Religion',type:'select',options:RELIGION_OPTIONS,required:true},
+
+  {section:'F',key:'fatherName',label:"Father's Name",type:'text',required:true},
+  {section:'F',key:'motherName',label:"Mother's Name",type:'text',required:true},
+  {section:'F',key:'occupation',label:'Occupation',type:'text',required:false},
+  {section:'F',key:'phone',label:'Contact Number',type:'phone10',required:true},
+  {section:'F',key:'whatsapp',label:'WhatsApp Number',type:'phone10',required:false},
+
+  {section:'AD',key:'habitation',label:'Habitation',type:'text',required:false},
+  {section:'AD',key:'district',label:'District',type:'district',required:true,defaultValue:'SOUTH TWENTY FOUR PARGANAS'},
+  {section:'AD',key:'block',label:'Block',type:'block',required:true,defaultValue:'Magrahat-II'},
+  {section:'AD',key:'panchayat',label:'Panchayat',type:'text',required:false},
+  {section:'AD',key:'postOffice',label:'Post Office',type:'text',required:false},
+  {section:'AD',key:'policeStation',label:'Police Station',type:'text',required:true,defaultValue:'Magrahat'},
+  {section:'AD',key:'pinCode',label:'Pin Code',type:'pincode',required:false},
+  {section:'AD',key:'address',label:'Present Address',type:'textarea',required:true},
+
+  {section:'AM',key:'prevSchool',label:'Previous School (if any)',type:'text',required:false},
+  {section:'AM',key:'prevReason',label:'Reason for Leaving Previous School',type:'text',required:false}
+];
+const STUDENT_SECTION_HEADINGS={
+  S:'STUDENT INFORMATION',
+  F:'FAMILY INFORMATION',
+  AD:'ADDRESS',
+  AM:'ADMISSION DETAILS'
+};
+function fieldElId(prefix,key){ return prefix+key.charAt(0).toUpperCase()+key.slice(1); }
+function renderStudentFieldHTML(prefix,f,currentValue,allVals){
+  const id=fieldElId(prefix,f.key);
+  const req=f.required?' *':'';
+  let control='';
+  if(f.type==='select'){
+    control=simpleSelectHTML(id,f.options,currentValue||f.defaultValue||'');
+  } else if(f.type==='district'){
+    const distVal=currentValue||f.defaultValue||'';
+    control=`<select id="${id}" onchange="refreshBlockOptions('${prefix}')" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+      <option value="">Select</option>
+      ${DISTRICT_LIST_WB.map(o=>`<option ${o===distVal?'selected':''}>${o}</option>`).join('')}
+    </select>`;
+  } else if(f.type==='block'){
+    const distVal=(allVals&&allVals.district)||f.districtDefault||'SOUTH TWENTY FOUR PARGANAS';
+    const blockVal=currentValue||f.defaultValue||'';
+    const opts=blockOptionsForDistrict(distVal);
+    control=`<select id="${id}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+      <option value="">Select</option>
+      ${opts.map(o=>`<option ${o===blockVal?'selected':''}>${o}</option>`).join('')}
+    </select>`;
+  } else if(f.type==='textarea'){
+    control=`<textarea id="${id}" rows="2" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;resize:vertical">${esc(currentValue||'')}</textarea>`;
+  } else if(f.type==='number'){
+    control=`<input id="${id}" type="number" value="${esc(currentValue||'')}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">`;
+  } else if(f.type==='email'){
+    control=`<input id="${id}" type="email" value="${esc(currentValue||'')}" placeholder="Optional" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">`;
+  } else if(f.type==='aadhaar'){
+    control=`<input id="${id}" value="${esc(currentValue||'')}" placeholder="12-digit Aadhaar (optional)" maxlength="12" inputmode="numeric" oninput="digitsOnlyInput(this,12)" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">`;
+  } else if(f.type==='pincode'){
+    control=`<input id="${id}" value="${esc(currentValue||'')}" placeholder="6-digit PIN" maxlength="6" inputmode="numeric" oninput="digitsOnlyInput(this,6)" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">`;
+  } else if(f.type==='phone10'){
+    control=`<input id="${id}" type="tel" value="${esc(currentValue||'')}" placeholder="10-digit number" maxlength="10" inputmode="numeric" oninput="digitsOnlyInput(this,10)" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">`;
+  } else if(f.type==='dob'){
+    const dispId=id+'Display';
+    const dmy=currentValue?dobISOToDMY(currentValue):'';
+    const onch=f.key==='dob'?`handleDobChange('${prefix}')`:`syncDMYToHidden('${dispId}','${id}')`;
+    control=`<input id="${dispId}" type="text" inputmode="numeric" placeholder="DD/MM/YYYY" maxlength="10" value="${dmy}" oninput="formatDobInput(this)" onchange="${onch}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+      <input id="${id}" type="hidden" value="${currentValue||''}">`
+      +(f.key==='dob'?`<div id="${prefix}DobInfo" style="margin-top:6px;font-size:11.5px;color:#1a3a6b">${dobInfoHTML(currentValue||'')}</div>`:'');
+  } else {
+    control=`<input id="${id}" value="${esc(currentValue||f.defaultValue||'')}" placeholder="${f.placeholder||(f.required?'':'Optional')}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">`;
+  }
+  const sub=f.subheading?`<div style="font-size:12px;font-weight:800;color:#6b7a99;text-transform:uppercase;letter-spacing:.4px;margin-top:10px">${f.subheading}</div>`:'';
+  return sub+`<div class="form-group"><label>${esc(f.label)}${req}</label>${control}</div>`;
+}
+function renderStudentSectionHTML(prefix,sectionKey,sVals){
+  const fields=STUDENT_FIELD_SCHEMA.filter(f=>f.section===sectionKey);
+  return `<div style="font-size:13.5px;font-weight:900;color:#1a3a6b;background:#eef2ff;padding:8px 12px;border-radius:8px;margin:18px 0 10px;letter-spacing:.3px">${STUDENT_SECTION_HEADINGS[sectionKey]}</div>`
+    + fields.map(f=>renderStudentFieldHTML(prefix,f,sVals[f.key],sVals)).join('');
+}
+// Reads all schema-driven fields from the form into a plain object, and validates required/format rules.
+// Returns {values, error} — error is null if everything's valid.
+function collectStudentFields(prefix){
+  const values={};
+  for(const f of STUDENT_FIELD_SCHEMA){
+    const id=fieldElId(prefix,f.key);
+    const el=document.getElementById(id);
+    if(!el) continue;
+    values[f.key]=el.value.trim ? el.value.trim() : el.value;
+  }
+  for(const f of STUDENT_FIELD_SCHEMA){
+    const v=values[f.key];
+    if(f.required && !v) return {values,error:`${f.label} is required.`};
+    if(v && f.type==='aadhaar' && !/^\d{12}$/.test(v)) return {values,error:'Aadhaar No of Child must be exactly 12 digits.'};
+    if(v && f.type==='pincode' && !/^\d{6}$/.test(v)) return {values,error:'Pin Code must be exactly 6 digits.'};
+    if(v && f.type==='phone10' && !isValidPhone10(v)) return {values,error:`${f.label} must be exactly 10 digits.`};
+    if(v && f.type==='email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return {values,error:'Enter a valid email address.'};
+    if(f.type==='dob' && document.getElementById(id+'Display') && document.getElementById(id+'Display').value.trim() && !v) return {values,error:`${f.label} must be a valid date in DD/MM/YYYY format.`};
+  }
+  return {values,error:null};
+}
 // dd/mm/yyyy <-> ISO (yyyy-mm-dd) helpers for the Date of Birth fields
 function dobDMYToISO(str){
   const m=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec((str||'').trim());
@@ -7117,9 +7316,8 @@ function openRoutineEditor(){
   const cr = routine[cls]||{};
   const teachers = ls('teachers')||[];
   const allDays = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-  const clsSubs = getClassSubjects(cls);
-  const subNames = clsSubs.map(s=>typeof s==='string'?s:s.name).filter(Boolean);
-  if(!subNames.length) subNames.push(...SUBJECTS_DEFAULT);
+  const clsSubs = getExamRegisterSubjectNames(cls);
+  const subNames = clsSubs.length ? clsSubs : SUBJECTS_DEFAULT;
   const pt = getPeriodTimings();
 
   // 5 periods + tiffin
@@ -7201,6 +7399,25 @@ function saveRoutine(cls){
   if(!routine[cls]) routine[cls]={};
   const allDays = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   allDays.forEach(d=>{ if(!routine[cls][d]) routine[cls][d]={}; });
+
+  // Validate teacher double-booking against every OTHER class before saving anything
+  const conflicts=[];
+  document.querySelectorAll('.routineSubj').forEach(sel=>{
+    const day = sel.dataset.day;
+    const periodRaw = sel.dataset.period;
+    const period = periodRaw==='t'?'t':parseInt(periodRaw);
+    const teacherSel = document.querySelector(`.routineTeacher[data-day="${day}"][data-period="${periodRaw}"]`);
+    const tchVal = teacherSel?.value||'';
+    if(tchVal){
+      const conflictCls = findTeacherConflict(day, period, tchVal, cls);
+      if(conflictCls) conflicts.push(`${tchVal} — ${day}, ${periodRaw==='t'?'Tiffin':'Period '+(parseInt(periodRaw)+1)} (already on ${conflictCls})`);
+    }
+  });
+  if(conflicts.length){
+    alert('⚠️ Cannot save — the following teachers are already assigned to another class in the same period:\n\n'+conflicts.join('\n')+'\n\nPlease fix these before saving.');
+    return;
+  }
+
   document.querySelectorAll('.routineSubj').forEach(sel=>{
     const day = sel.dataset.day;
     const period = sel.dataset.period==='t'?'t':parseInt(sel.dataset.period);
@@ -10797,6 +11014,18 @@ function getExamConfig(cls, term){
   return { subjects: getDefaultExamSubjects() };
 }
 function getSubjects(cls, term){ return getExamConfig(cls, term).subjects; }
+// Union of subject names configured in the Exam Marks Register across all 3 terms for a class —
+// used by Class Routine so its subject dropdown always matches what Exam Marks Register uses.
+function getExamRegisterSubjectNames(cls){
+  const names=[];
+  ['1','2','3'].forEach(term=>{
+    (getSubjects(cls,term)||[]).forEach(sub=>{
+      const label=sub.label||sub.name;
+      if(label && !names.includes(label)) names.push(label);
+    });
+  });
+  return names;
+}
 function getGrandTotal(cls, term){ return getSubjects(cls, term).reduce((s,sub)=>s+(sub.fullT||0),0); }
 // Upgrades a class entry to the per-term {'1':{subjects},'2':{subjects},'3':{subjects}}
 // shape in place, copying any older flat subject list into all 3 terms first so
@@ -12937,6 +13166,10 @@ function renderRoutine(){
       style="padding:10px 20px;border:none;background:none;color:#64748b;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;border-radius:6px 6px 0 0">
       📆 Daily (All Classes)
     </button>
+    ${currentUser.role==='principal'?`<button id="rtabSchool" onclick="switchRoutineView('school')"
+      style="padding:10px 20px;border:none;background:none;color:#64748b;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;border-radius:6px 6px 0 0">
+      🏫 Whole School (Edit)
+    </button>`:''}
   </div>
 
   <!-- WEEKLY VIEW -->
@@ -12988,24 +13221,36 @@ function renderRoutine(){
       </div>
     </div>
     <div id="dailyRoutineBody"></div>
+  </div>
+
+  <!-- WHOLE SCHOOL EDITABLE VIEW -->
+  <div id="routineSchoolView" style="display:none">
+    <div class="card no-print" style="border-top-left-radius:0;padding:14px 16px">
+      <div style="font-size:12px;color:#64748b"><i class="fas fa-info-circle"></i> Every class, every day, every period — one table. Scroll sideways for Monday through Saturday. Edit any cell directly. A teacher already on another class in the same period gets blocked automatically.</div>
+    </div>
+    <div id="wsrBody"></div>
   </div>`;
 }
 
 function switchRoutineView(view){
   const weekly = document.getElementById('routineWeeklyView');
   const daily  = document.getElementById('routineDailyView');
+  const school = document.getElementById('routineSchoolView');
   const wBtn   = document.getElementById('rtabWeekly');
   const dBtn   = document.getElementById('rtabDaily');
+  const sBtn   = document.getElementById('rtabSchool');
+  [weekly,daily,school].forEach(el=>{ if(el) el.style.display='none'; });
+  [wBtn,dBtn,sBtn].forEach(btn=>{ if(btn){ btn.style.background='none'; btn.style.color='#64748b'; } });
   if(view==='weekly'){
     if(weekly) weekly.style.display='';
-    if(daily)  daily.style.display='none';
     if(wBtn){ wBtn.style.background='#1a3a6b'; wBtn.style.color='white'; }
-    if(dBtn){ dBtn.style.background='none'; dBtn.style.color='#64748b'; }
     loadRoutine();
+  } else if(view==='school'){
+    if(school) school.style.display='';
+    if(sBtn){ sBtn.style.background='#1a3a6b'; sBtn.style.color='white'; }
+    loadWholeSchoolRoutine();
   } else {
-    if(weekly) weekly.style.display='none';
-    if(daily)  daily.style.display='';
-    if(wBtn){ wBtn.style.background='none'; wBtn.style.color='#64748b'; }
+    if(daily) daily.style.display='';
     if(dBtn){ dBtn.style.background='#1a3a6b'; dBtn.style.color='white'; }
     loadDailyRoutine();
   }
@@ -13171,6 +13416,127 @@ function loadDailyRoutine(){
     </div>`;
   }).join('')}
   </div>`;
+}
+
+// ───────────────────────────────────────────────
+//  WHOLE SCHOOL ROUTINE — every class, one day, side by side, directly editable.
+//  Blocks assigning a teacher to a class if they're already teaching a
+//  different class in the same period on the same day.
+// ───────────────────────────────────────────────
+function loadWholeSchoolRoutine(){
+  const routine  = ls('routine')||{};
+  const pt       = getPeriodTimings();
+  const classes  = getAllClasses();
+  const teachers = ls('teachers')||[];
+  const box = document.getElementById('wsrBody');
+  if(!box) return;
+  if(!classes.length){ box.innerHTML=emptyState('📋','No classes defined','Add classes in Class Manager'); return; }
+
+  const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const PERIODS = [0,1,2,3,4]; // Period 1..5
+
+  const tchOptsHTML=(currentVal)=>{
+    let names=teachers.map(t=>t.name);
+    if(currentVal && !names.includes(currentVal)) names=[currentVal,...names];
+    return `<option value="">— Free —</option>`+names.map(n=>`<option value="${esc(n)}"${n===currentVal?' selected':''}>${esc(n)}</option>`).join('');
+  };
+  const subOptsHTML=(cls,currentVal)=>{
+    let opts=getExamRegisterSubjectNames(cls);
+    if(!opts.length) opts=SUBJECTS_DEFAULT.slice();
+    if(currentVal && !opts.includes(currentVal)) opts=[currentVal,...opts];
+    return `<option value="">— Free —</option>`+opts.map(s=>`<option value="${esc(s)}"${s===currentVal?' selected':''}>${esc(s)}</option>`).join('');
+  };
+
+  const dayColors = ['#1a3a6b','#1e4db7','#1a3a6b','#1e4db7','#1a3a6b','#1e4db7'];
+
+  box.innerHTML = `
+  <div class="card" style="margin-bottom:14px;padding:14px 18px;background:linear-gradient(135deg,#1a3a6b,#1e4db7)">
+    <div style="color:white;font-weight:900;font-size:16px"><i class="fas fa-school"></i> Whole School Routine — Full Week</div>
+    <div style="color:rgba(255,255,255,.7);font-size:12px;margin-top:4px">${classes.length} class${classes.length!==1?'es':''} · Monday–Saturday · All 5 periods · Edit any cell directly · Double-booking a teacher is blocked automatically</div>
+  </div>
+  <div class="table-wrap" style="overflow-x:auto">
+  <table style="border-collapse:collapse;font-size:11px">
+    <thead>
+      <tr>
+        <th rowspan="2" style="padding:8px 10px;color:white;text-align:left;min-width:130px;position:sticky;left:0;background:#0d1f3c;z-index:3">Class</th>
+        ${DAYS.map((d,di)=>`<th colspan="${PERIODS.length}" style="padding:6px 4px;color:white;text-align:center;background:${dayColors[di]};border-left:2px solid white">${d}${d===CURRENT_ROUTINE_DAY?' ★':''}</th>`).join('')}
+      </tr>
+      <tr>
+        ${DAYS.map((d,di)=>PERIODS.map(pi=>{
+          const timing=pt[pi];
+          const timeTxt=timing&&timing.start?fmtTime(timing.start).replace(' ',''):'';
+          return `<th style="padding:4px 2px;color:white;background:${dayColors[di]};font-size:9px;font-weight:700;min-width:98px;${pi===0?'border-left:2px solid white':''}">P${pi+1}${timeTxt?`<div style="font-size:8px;font-weight:400;opacity:.85">${timeTxt}</div>`:''}</th>`;
+        }).join('')).join('')}
+      </tr>
+    </thead>
+    <tbody>
+      ${classes.map((cls,ci)=>{
+        const rowBg = ci%2===0?'#fafbff':'white';
+        return `<tr style="border-bottom:1px solid #e8eef5;background:${rowBg}">
+          <td style="padding:6px 10px;font-weight:800;color:#1a3a6b;white-space:nowrap;font-size:11px;position:sticky;left:0;background:${rowBg};z-index:1;border-right:2px solid #d0dbe8">${esc(cls)}</td>
+          ${DAYS.map(day=>PERIODS.map(pi=>{
+            const cell=((routine[cls]||{})[day]||{})[pi]||{};
+            return `<td style="padding:3px 3px;${pi===0?'border-left:2px solid #d0dbe8':''}">
+              <select class="wsrSubj" data-cls="${esc(cls)}" data-day="${day}" data-period="${pi}" data-field="subject" onchange="wsrSaveCell(this)"
+                style="width:100%;font-size:9px;padding:3px 3px;border:1.5px solid #d0dbe8;border-radius:5px;font-family:inherit;margin-bottom:2px;background:white">
+                ${subOptsHTML(cls,cell.subject||'')}
+              </select>
+              <select class="wsrTeacher" data-cls="${esc(cls)}" data-day="${day}" data-period="${pi}" data-field="teacher" onchange="wsrSaveCell(this)"
+                style="width:100%;font-size:9px;padding:3px 3px;border:1.5px solid #d0dbe8;border-radius:5px;font-family:inherit;background:white">
+                ${tchOptsHTML(cell.teacher||'')}
+              </select>
+            </td>`;
+          }).join('')).join('')}
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>
+  </div>`;
+}
+
+// Returns the class name a teacher is already assigned to for this day+period, or null if free.
+function findTeacherConflict(day, pi, teacherName, excludeClass){
+  if(!teacherName) return null;
+  const routine = ls('routine')||{};
+  const classes = getAllClasses();
+  for(const cls of classes){
+    if(cls===excludeClass) continue;
+    const cell = ((routine[cls]||{})[day]||{})[pi];
+    if(cell && cell.teacher === teacherName) return cls;
+  }
+  return null;
+}
+
+function wsrSaveCell(el){
+  const cls   = el.dataset.cls;
+  const day   = el.dataset.day;
+  const pi    = el.dataset.period==='t' ? 't' : parseInt(el.dataset.period);
+  const field = el.dataset.field;
+  const value = el.value;
+
+  const routine = ls('routine')||{};
+  if(!routine[cls]) routine[cls]={};
+  if(!routine[cls][day]) routine[cls][day]={};
+  if(!routine[cls][day][pi]) routine[cls][day][pi]={subject:'',teacher:''};
+  const cell = routine[cls][day][pi];
+
+  if(field==='teacher' && value){
+    const conflictCls = findTeacherConflict(day, pi, value, cls);
+    if(conflictCls){
+      toast(`⚠️ ${value} is already teaching ${conflictCls} in this period on ${day}. Choose a different teacher.`,'error');
+      el.value = cell.teacher || '';
+      return;
+    }
+  }
+
+  cell[field] = value;
+  if(!cell.subject && !cell.teacher){
+    delete routine[cls][day][pi];
+  } else {
+    routine[cls][day][pi] = cell;
+  }
+  ss('routine', routine);
+  toast(`✅ Saved — ${cls}, ${day}, Period ${el.dataset.period}`);
 }
 
 function markTeacherAbsent(){
@@ -13632,7 +13998,9 @@ function openStudentProfile(id){
   <!-- BASIC TAB -->
   <div id="pfBasic">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
-      ${[['Student Name',s.name],['Father Name',s.fatherName||'—'],['Mother Name',s.motherName||'—'],['Date of Birth',fmtDate(s.dob)],['Gender',s.gender||'—'],['Religion',s.religion||'—'],['Phone',s.phone||'—'],['Alt. Phone',s.phone2||'—'],['Class',s.class],['Section',s.section||'—'],['Roll No.',s.roll],['Session',s.session],['Student ID',s.studentId],['Enrolled On',fmtDate(s.createdAt)]].map(([l,v])=>`<div style="background:#f8faff;padding:9px 12px;border-radius:8px;border:1px solid var(--border)"><div style="font-size:10px;color:var(--text-muted);font-weight:800;text-transform:uppercase">${l}</div><div style="font-size:13px;font-weight:700;color:var(--primary-dark);margin-top:2px">${esc(String(v))}</div></div>`).join('')}
+      ${[['Student Name',s.name],['Class',s.class],['Section',s.section||'—'],['Roll No.',s.roll],['Academic Year',s.session],['Student ID',s.studentId],
+        ...STUDENT_FIELD_SCHEMA.map(f=>[f.label, f.type==='dob'?fmtDate(s[f.key]):(s[f.key]||'—')]),
+        ['Enrolled On',fmtDate(s.createdAt)]].map(([l,v])=>`<div style="background:#f8faff;padding:9px 12px;border-radius:8px;border:1px solid var(--border)"><div style="font-size:10px;color:var(--text-muted);font-weight:800;text-transform:uppercase">${l}</div><div style="font-size:13px;font-weight:700;color:var(--primary-dark);margin-top:2px">${esc(String(v))}</div></div>`).join('')}
     </div>
     ${s.address?`<div style="background:#f8faff;padding:9px 12px;border-radius:8px;border:1px solid var(--border);margin-top:8px"><div style="font-size:10px;color:var(--text-muted);font-weight:800;text-transform:uppercase">Address</div><div style="font-size:13px;font-weight:700;color:var(--primary-dark);margin-top:2px">${esc(s.address)}</div></div>`:''}
   </div>
@@ -14336,6 +14704,50 @@ function getEffectiveFee(studentId, feeType, cls) {
 }
 
 // ─────────────────────────────────────────────────────
+//  STUDENT FEE WALLET — carries forward overpaid change as credit
+//  instead of it being lost when the school has no change to return.
+//  Stored at fees[studentId].wallet (number) and .walletHistory (array).
+// ─────────────────────────────────────────────────────
+function getWalletBalance(studentId){
+  const fees=ls('fees')||{};
+  return (fees[studentId]&&fees[studentId].wallet)||0;
+}
+function walletTxn(studentId, type, amount, note){
+  amount=Math.round((parseFloat(amount)||0)*100)/100;
+  if(amount<=0) return getWalletBalance(studentId);
+  const fees=ls('fees')||{};
+  if(!fees[studentId]) fees[studentId]={};
+  const bal=fees[studentId].wallet||0;
+  const newBal = type==='credit' ? bal+amount : Math.max(0, bal-amount);
+  fees[studentId].wallet = newBal;
+  if(!fees[studentId].walletHistory) fees[studentId].walletHistory=[];
+  fees[studentId].walletHistory.push({date:today(),type,amount,note:note||'',balanceAfter:newBal});
+  ss('fees',fees);
+  return newBal;
+}
+function creditWallet(studentId, amount, note){ return walletTxn(studentId,'credit',amount,note); }
+function debitWallet(studentId, amount, note){ return walletTxn(studentId,'debit',amount,note); }
+function renderWalletHistoryHTML(studentId){
+  const fees=ls('fees')||{};
+  const hist=(fees[studentId]&&fees[studentId].walletHistory)||[];
+  if(!hist.length) return '<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:12px">No wallet transactions yet.</div>';
+  return `<div style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:#f8faff;text-align:left"><th style="padding:6px 10px">Date</th><th style="padding:6px 10px">Type</th><th style="padding:6px 10px">Amount</th><th style="padding:6px 10px">Note</th><th style="padding:6px 10px">Balance</th></tr></thead>
+      <tbody>
+      ${[...hist].reverse().map(h=>`<tr style="border-top:1px solid var(--border)">
+        <td style="padding:6px 10px">${fmtDate(h.date)}</td>
+        <td style="padding:6px 10px"><span style="font-weight:700;color:${h.type==='credit'?'#15803d':'#b91c1c'}">${h.type==='credit'?'+ Credit':'− Debit'}</span></td>
+        <td style="padding:6px 10px;font-weight:700">₹${h.amount}</td>
+        <td style="padding:6px 10px;color:var(--text-muted)">${esc(h.note||'—')}</td>
+        <td style="padding:6px 10px;font-weight:700">₹${h.balanceAfter}</td>
+      </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+// ─────────────────────────────────────────────────────
 //  V5-1: FEE SETTINGS PAGE
 // ─────────────────────────────────────────────────────
 function renderFeeSettings() {
@@ -14522,10 +14934,10 @@ function collectExamFeeV5(studentId){
 // ─────────────────────────────────────────────────────
 //  V5-5: FULL FINANCIAL HISTORY
 // ─────────────────────────────────────────────────────
-function saveReceiptV5(studentId,type,amount,mode,desc,months,remaining){
+function saveReceiptV5(studentId,type,amount,mode,desc,months,remaining,walletInfo){
   const receipts=ls('receipts')||[]; const id=uid();
   const students=ls('students')||[]; const s=students.find(x=>x.id===studentId);
-  receipts.push({id,studentId,type,amount,mode,desc,months:months||[],date:today(),student:s,remaining:remaining||0});
+  receipts.push({id,studentId,type,amount,mode,desc,months:months||[],date:today(),createdAt:new Date().toISOString(),student:s,remaining:remaining||0,walletInfo:walletInfo||null});
   ss('receipts',receipts);
 
   // ── AUTO-SYNC to Society Cash Book Fee Collection Register ──
@@ -14608,13 +15020,20 @@ function printReceiptV5(receiptId){
   const admTotal=getEffectiveFee(r.studentId,'admission',s.class);
   const admPaid=sf.admissionPaid||0; const admRemain=Math.max(0,admTotal-admPaid);
   const receiptNo='RCP-'+r.id.slice(-8).toUpperCase();
-  const printDate=new Date(r.date).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
-  const printTime=new Date(r.date).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+  const printMoment = r.createdAt ? new Date(r.createdAt) : new Date(r.date+'T00:00:00');
+  const printDate=printMoment.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+  const printTime=r.createdAt ? printMoment.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : '';
   const balanceLine = r.type==='Admission'&&admRemain>0
     ? `<div class="row"><span>Admission Balance Due</span><span class="bold">₹${admRemain}</span></div>`
     : r.remaining>0
       ? `<div class="row"><span>Balance Due</span><span class="bold">₹${r.remaining}</span></div>`
       : `<div class="center bold" style="margin-top:4px">*** FULLY PAID ***</div>`;
+  const wi = r.walletInfo;
+  const walletBlock = wi ? `<div class="line"></div>
+    ${wi.cashReceived!=null?`<div class="row"><span>Cash Received</span><span>₹${wi.cashReceived}</span></div>`:''}
+    ${wi.used>0?`<div class="row"><span>Wallet Used</span><span>− ₹${wi.used}</span></div>`:''}
+    ${wi.credited>0?`<div class="row"><span>Wallet Credited</span><span>+ ₹${wi.credited}</span></div>`:''}
+    <div class="row bold"><span>Wallet Balance (New)</span><span>₹${wi.balanceAfter}</span></div>` : '';
   const w=window.open('','_blank');
   w.document.write(`<!DOCTYPE html><html><head><title>Fee Receipt — ${s.name||''}</title>
   <style>
@@ -14642,7 +15061,7 @@ function printReceiptV5(receiptId){
     </div>
     <div class="line"></div>
     <div class="row"><span>Receipt No</span><span>${receiptNo}</span></div>
-    <div class="row"><span>Date</span><span>${printDate} ${printTime}</span></div>
+    <div class="row"><span>Date</span><span>${printDate}${printTime?' '+printTime:''}</span></div>
     <div class="line"></div>
     <div class="row"><span>Name</span><span>${esc(s.name||'—')}</span></div>
     <div class="row"><span>Father</span><span>${esc(s.fatherName||'—')}</span></div>
@@ -14657,6 +15076,7 @@ function printReceiptV5(receiptId){
     <div class="line"></div>
     <div class="row big"><span>AMOUNT PAID</span><span>₹${r.amount}</span></div>
     ${balanceLine}
+    ${walletBlock}
     <div class="line"></div>
     <div class="center small">Received by: ______________</div>
     <div class="center footer">Thank you for your payment<br>Computer-generated receipt</div>
@@ -16640,6 +17060,7 @@ function openCollectFee(studentId){
 
   const admPct = admTotal>0 ? Math.min(100,Math.round(admPaid/admTotal*100)) : 100;
   const mPaid  = Object.values(sf.monthly||{}).filter(x=>x.paid).length;
+  const walletBal = getWalletBalance(studentId);
 
   // Calculate pending totals for Full Package tab
   const unpaidMonthCount  = 12 - mPaid;
@@ -16662,10 +17083,11 @@ function openCollectFee(studentId){
         <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${mPaid}/12 months paid</div>
       </div>
     </div>
-    <div style="margin-top:10px;background:white;border-radius:8px;padding:8px 10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">
+    <div style="margin-top:10px;background:white;border-radius:8px;padding:8px 10px;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;text-align:center">
       <div><div style="font-size:9px;color:var(--text-muted);font-weight:700;text-transform:uppercase">Admission</div><div style="font-size:13px;font-weight:900;color:${admRemain>0?'#b91c1c':'#15803d'}">₹${admPaid}/₹${admTotal}</div></div>
       <div><div style="font-size:9px;color:var(--text-muted);font-weight:700;text-transform:uppercase">Monthly</div><div style="font-size:13px;font-weight:900;color:var(--primary)">₹${mAmt}/mo</div></div>
       <div><div style="font-size:9px;color:var(--text-muted);font-weight:700;text-transform:uppercase">Months Due</div><div style="font-size:13px;font-weight:900;color:${unpaidMonthCount>0?'#b91c1c':'#15803d'}">${unpaidMonthCount}</div></div>
+      <div><div style="font-size:9px;color:var(--text-muted);font-weight:700;text-transform:uppercase">💰 Wallet</div><div style="font-size:13px;font-weight:900;color:${walletBal>0?'#15803d':'var(--text-muted)'}">₹${walletBal}</div></div>
     </div>
   </div>
 
@@ -16674,6 +17096,7 @@ function openCollectFee(studentId){
     <button class="tab" onclick="switchFeeTab('ftMonthly8',this)">📅 Monthly</button>
     <button class="tab" onclick="switchFeeTab('ftExam8',this)">📝 Exam</button>
     <button class="tab" onclick="switchFeeTab('ftFullYear8',this)">⚡ Full Package</button>
+    <button class="tab" onclick="switchFeeTab('ftWallet8',this)">💰 Wallet</button>
     <button class="tab" onclick="switchFeeTab('ftHistory8',this)">📋 History</button>
   </div>
 
@@ -16704,17 +17127,17 @@ function openCollectFee(studentId){
       <div style="font-size:22px">📅</div>
       <div>
         <div style="font-weight:800;color:var(--primary)">Monthly Fee: ₹${mAmt}/month</div>
-        <div style="font-size:12px;color:var(--text-muted)">${mPaid} months paid · ${unpaidMonthCount} months pending</div>
+        <div style="font-size:12px;color:var(--text-muted)">${mPaid} months paid · ${unpaidMonthCount} months pending${walletBal>0?` · 💰 Wallet: ₹${walletBal}`:''}</div>
       </div>
     </div>
     ${monthOpts
       ? `<div class="form-row">
           <div class="form-group">
             <label>Select Month(s) to Pay</label>
-            <select id="v8fMonthSel" multiple size="6" style="width:100%;padding:8px;border:2px solid var(--border);border-radius:8px">${monthOpts}</select>
+            <select id="v8fMonthSel" multiple size="6" style="width:100%;padding:8px;border:2px solid var(--border);border-radius:8px" onchange="v8UpdateMonthlyWalletUI('${s.id}')">${monthOpts}</select>
             <div style="display:flex;gap:6px;margin-top:6px">
-              <button type="button" class="btn btn-xs btn-outline" onclick="selectAllMonths()">Select All</button>
-              <button type="button" class="btn btn-xs btn-light" onclick="clearAllMonths()">Clear</button>
+              <button type="button" class="btn btn-xs btn-outline" onclick="selectAllMonths();v8UpdateMonthlyWalletUI('${s.id}')">Select All</button>
+              <button type="button" class="btn btn-xs btn-light" onclick="clearAllMonths();v8UpdateMonthlyWalletUI('${s.id}')">Clear</button>
             </div>
             <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Hold Ctrl/Cmd to select multiple months</div>
           </div>
@@ -16722,11 +17145,25 @@ function openCollectFee(studentId){
             <label>Payment Mode</label>
             <select id="v8fMonthMode" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"><option>Cash</option><option>UPI</option><option>Cheque</option><option>Bank Transfer</option></select>
             <div class="form-group" style="margin-top:12px">
-              <label>Override Amount (optional)</label>
-              <input id="v8fMonthAmt" type="number" placeholder="Auto-calculated if blank" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px">
+              <label>Fee Amount Due (optional override)</label>
+              <input id="v8fMonthAmt" type="number" placeholder="Auto-calculated if blank" oninput="v8UpdateMonthlyWalletUI('${s.id}')" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px">
             </div>
           </div>
         </div>
+        <div class="form-group">
+          <label>Amount Received (₹)</label>
+          <input id="v8fMonthReceived" type="number" placeholder="Leave blank if parent is paying the exact amount due" oninput="v8UpdateMonthlyWalletUI('${s.id}')" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px">
+        </div>
+        ${walletBal>0?`
+        <label style="display:flex;align-items:center;gap:8px;margin:6px 0;font-size:12.5px;color:var(--text);cursor:pointer">
+          <input type="checkbox" id="v8fMonthUseWallet" checked onchange="v8UpdateMonthlyWalletUI('${s.id}')" style="width:16px;height:16px">
+          Use Wallet Balance (₹${walletBal} available) to cover this fee
+        </label>`:''}
+        <label style="display:flex;align-items:center;gap:8px;margin:6px 0 10px;font-size:12.5px;color:var(--text);cursor:pointer">
+          <input type="checkbox" id="v8fMonthCreditExcess" checked style="width:16px;height:16px">
+          If parent pays extra and there's no change to return, credit the excess to Wallet
+        </label>
+        <div id="v8fMonthWalletNote" style="font-size:12px;font-weight:700;padding:8px 12px;border-radius:8px;margin-bottom:10px"></div>
         <button class="btn btn-primary" style="width:100%;padding:12px;font-size:14px" onclick="v8CollectMonthly('${s.id}')"><i class="fas fa-check-circle"></i> Collect Monthly Fee & Print Receipt</button>`
       : '<div style="padding:14px;background:#dcfce7;border-radius:10px;text-align:center;font-weight:800;color:#15803d"><i class="fas fa-check-circle"></i> All 12 months paid!</div>'
     }
@@ -16774,6 +17211,27 @@ function openCollectFee(studentId){
     :'<div style="padding:16px;background:#dcfce7;border-radius:12px;text-align:center;font-weight:800;color:#15803d;font-size:14px"><i class="fas fa-check-circle"></i> All fees fully paid! 🎉</div>'}
   </div>
 
+  <!-- WALLET TAB -->
+  <div id="ftWallet8" style="display:none;padding-top:14px">
+    <div style="background:linear-gradient(135deg,#0d1f3c,#1a3a6b);border-radius:14px;padding:18px;margin-bottom:14px;text-align:center">
+      <div style="color:rgba(255,255,255,.75);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px">Wallet Balance</div>
+      <div style="color:var(--gold-light);font-size:32px;font-weight:900;margin-top:4px">₹${walletBal}</div>
+      <div style="color:rgba(255,255,255,.6);font-size:11px;margin-top:4px">Extra amount paid that hasn't been used yet — can be applied to any future fee.</div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Add to Wallet (₹)</label><input id="v8fWalletAddAmt" type="number" placeholder="e.g. 160" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
+      <div class="form-group"><label>Note (optional)</label><input id="v8fWalletAddNote" placeholder="e.g. Change from cash payment" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
+    </div>
+    <button class="btn btn-success" style="width:100%;padding:10px;font-size:13px;margin-bottom:10px" onclick="v8WalletManualCredit('${s.id}')"><i class="fas fa-plus-circle"></i> Add to Wallet</button>
+    <div class="form-row">
+      <div class="form-group"><label>Deduct from Wallet (₹)</label><input id="v8fWalletDeductAmt" type="number" placeholder="e.g. 100" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
+      <div class="form-group"><label>Note (optional)</label><input id="v8fWalletDeductNote" placeholder="e.g. Refunded to parent" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
+    </div>
+    <button class="btn btn-outline" style="width:100%;padding:10px;font-size:13px;margin-bottom:16px" onclick="v8WalletManualDebit('${s.id}')"><i class="fas fa-minus-circle"></i> Deduct from Wallet</button>
+    <div style="font-size:12px;font-weight:800;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">Wallet Transaction History</div>
+    ${renderWalletHistoryHTML(s.id)}
+  </div>
+
   <!-- HISTORY TAB -->
   <div id="ftHistory8" style="display:none;padding-top:14px">
     ${renderFullFinancialHistory(s.id)}
@@ -16784,6 +17242,7 @@ function openCollectFee(studentId){
     {label:'📱 WhatsApp', cls:'btn-success btn-sm', onclick:`sendWALastReceipt('${s.id}')`},
     {label:'Close', cls:'btn-outline btn-sm', onclick:'closeModal()'}
   ], 'modal-lg');
+  v8UpdateMonthlyWalletUI(s.id);
 }
 
 
@@ -16857,10 +17316,55 @@ function v8CollectAdm(studentId){
   printReceiptV5(rId);
 }
 
+// Live feedback shown under the Monthly tab's amount fields — recalculates due vs received vs wallet on every keystroke.
+function v8UpdateMonthlyWalletUI(studentId){
+  const selEl=document.getElementById('v8fMonthSel');
+  const amtEl=document.getElementById('v8fMonthAmt');
+  const recvEl=document.getElementById('v8fMonthReceived');
+  const useWalletEl=document.getElementById('v8fMonthUseWallet');
+  const creditExcessEl=document.getElementById('v8fMonthCreditExcess');
+  const noteEl=document.getElementById('v8fMonthWalletNote');
+  if(!selEl||!noteEl) return;
+  const selMonths=[...selEl.options].filter(o=>o.selected);
+  const students=ls('students')||[]; const s=students.find(x=>x.id===studentId)||{};
+  const mAmt=getEffectiveFee(studentId,'monthly',s.class);
+  const customAmt=parseFloat(amtEl?.value)||0;
+  const due=customAmt||selMonths.length*mAmt;
+  const walletBal=getWalletBalance(studentId);
+  const useWallet=useWalletEl?useWalletEl.checked:false;
+  const walletApplied=useWallet?Math.min(walletBal,due):0;
+  const defaultReceived=Math.max(0,due-walletApplied);
+  const received=(recvEl&&recvEl.value!=='')?(parseFloat(recvEl.value)||0):defaultReceived;
+  const totalCovered=received+walletApplied;
+  const shortfall=due-totalCovered;
+  const excess=totalCovered-due;
+
+  if(due<=0){
+    noteEl.textContent='Select at least one month to see the amount due.';
+    noteEl.style.background='#f1f5f9'; noteEl.style.color='#64748b';
+  } else if(shortfall>0.001){
+    noteEl.innerHTML=`⚠️ Short by ₹${shortfall.toFixed(0)}. ${walletApplied>0?`Wallet covers ₹${walletApplied}, but `:''}collect ₹${shortfall.toFixed(0)} more.`;
+    noteEl.style.background='#fee2e2'; noteEl.style.color='#b91c1c';
+  } else if(excess>0.001){
+    const creditExcess=creditExcessEl?creditExcessEl.checked:true;
+    noteEl.innerHTML=`✅ Due ₹${due}.${walletApplied>0?` Wallet covers ₹${walletApplied} +`:''} Cash ₹${received} received — ₹${excess.toFixed(0)} extra will be ${creditExcess?'<b>credited to Wallet</b>':'noted as change given'}.`;
+    noteEl.style.background='#dcfce7'; noteEl.style.color='#15803d';
+  } else if(walletApplied>0 && received<=0.001){
+    noteEl.innerHTML=`✅ Due ₹${due} — <b>fully covered by Wallet</b> (₹${walletApplied}). No cash needed.`;
+    noteEl.style.background='#dcfce7'; noteEl.style.color='#15803d';
+  } else {
+    noteEl.innerHTML=`✅ Due ₹${due} exactly covered${walletApplied>0?` (₹${walletApplied} from Wallet + ₹${received} cash)`:''}.`;
+    noteEl.style.background='#dcfce7'; noteEl.style.color='#15803d';
+  }
+}
+
 function v8CollectMonthly(studentId){
   const selEl = document.getElementById('v8fMonthSel');
   const modeEl = document.getElementById('v8fMonthMode');
   const amtEl = document.getElementById('v8fMonthAmt');
+  const recvEl = document.getElementById('v8fMonthReceived');
+  const useWalletEl = document.getElementById('v8fMonthUseWallet');
+  const creditExcessEl = document.getElementById('v8fMonthCreditExcess');
   if(!selEl||!modeEl){toast('Form not found','error');return;}
   const selMonths = [...selEl.options].filter(o=>o.selected).map(o=>parseInt(o.value));
   if(!selMonths.length){toast('Select at least one month','error');return;}
@@ -16868,17 +17372,75 @@ function v8CollectMonthly(studentId){
   const students = ls('students')||[]; const s = students.find(x=>x.id===studentId)||{};
   const mAmt = getEffectiveFee(studentId,'monthly',s.class);
   const customAmt = parseFloat(amtEl?.value)||0;
-  const totalAmt = customAmt || selMonths.length*mAmt;
+  const due = customAmt || selMonths.length*mAmt;
+
+  const walletBal = getWalletBalance(studentId);
+  const useWallet = useWalletEl ? useWalletEl.checked : false;
+  const creditExcess = creditExcessEl ? creditExcessEl.checked : true;
+  const walletApplied = useWallet ? Math.min(walletBal, due) : 0;
+  const defaultReceived = Math.max(0, due - walletApplied);
+  const received = (recvEl&&recvEl.value!=='') ? (parseFloat(recvEl.value)||0) : defaultReceived;
+  const totalCovered = received + walletApplied;
+
+  if(totalCovered + 0.001 < due){
+    toast(`Amount received is ₹${(due-totalCovered).toFixed(0)} short of the ₹${due} due.`,'error');
+    return;
+  }
+  const excess = Math.max(0, totalCovered - due);
+
   const fees = ls('fees')||{};
   if(!fees[studentId]) fees[studentId]={};
   if(!fees[studentId].monthly) fees[studentId].monthly={};
   selMonths.forEach(m=>{fees[studentId].monthly[m]={paid:true,amount:mAmt,date:today(),mode};});
   ss('fees',fees);
-  const desc = `Monthly fee — ${selMonths.map(m=>MONTHS[m]).join(', ')}`;
-  const rId = saveReceiptV5(studentId,'Monthly',totalAmt,mode,desc,selMonths,0);
-  toast('✅ Monthly fee collected!');
+
+  const monthLabel = selMonths.map(m=>MONTHS[m]).join(', ');
+  let walletNote='';
+  let newBalance = walletBal;
+  if(walletApplied>0){
+    newBalance = debitWallet(studentId, walletApplied, `Used for monthly fee (${monthLabel})`);
+    walletNote += ` | Wallet used: ₹${walletApplied}`;
+  }
+  if(excess>0 && creditExcess){
+    newBalance = creditWallet(studentId, excess, `Excess from monthly fee payment (${monthLabel})`);
+    walletNote += ` | +₹${excess} credited to Wallet (new balance ₹${newBalance})`;
+  }
+
+  const desc = `Monthly fee — ${monthLabel}${walletNote}`;
+  const walletInfo = (walletApplied>0 || (excess>0&&creditExcess)) ? {
+    cashReceived: received,
+    used: walletApplied,
+    credited: (excess>0&&creditExcess) ? excess : 0,
+    balanceAfter: newBalance
+  } : null;
+  const rId = saveReceiptV5(studentId,'Monthly',due,mode,desc,selMonths,0,walletInfo);
+  toast('✅ Monthly fee collected!'+(walletApplied>0?` ₹${walletApplied} used from wallet.`:'')+(excess>0&&creditExcess?` ₹${excess} added to wallet (new balance ₹${newBalance}).`:''));
   closeModal();
   printReceiptV5(rId);
+}
+
+// Manual Wallet adjustments (Wallet tab) — for corrections, refunds, or crediting change directly without a fee transaction.
+function v8WalletManualCredit(studentId){
+  const amtEl=document.getElementById('v8fWalletAddAmt');
+  const noteEl=document.getElementById('v8fWalletAddNote');
+  const amt=parseFloat(amtEl?.value)||0;
+  if(amt<=0){toast('Enter an amount to add','error');return;}
+  creditWallet(studentId, amt, noteEl?.value||'Manual credit');
+  toast(`✅ ₹${amt} added to wallet`);
+  openCollectFee(studentId);
+  switchFeeTab('ftWallet8', null);
+}
+function v8WalletManualDebit(studentId){
+  const amtEl=document.getElementById('v8fWalletDeductAmt');
+  const noteEl=document.getElementById('v8fWalletDeductNote');
+  const amt=parseFloat(amtEl?.value)||0;
+  if(amt<=0){toast('Enter an amount to deduct','error');return;}
+  const bal=getWalletBalance(studentId);
+  if(amt>bal){toast(`Wallet only has ₹${bal}`,'error');return;}
+  debitWallet(studentId, amt, noteEl?.value||'Manual debit');
+  toast(`✅ ₹${amt} deducted from wallet`);
+  openCollectFee(studentId);
+  switchFeeTab('ftWallet8', null);
 }
 
 function v8CollectExam(studentId){
@@ -17614,9 +18176,10 @@ function printTop10Certificate(){
 function openAddStudent(){
   const session = getActiveSession();
   const classes = getAllClasses();
+  const sVals={district:'SOUTH TWENTY FOUR PARGANAS',block:'Magrahat-II',policeStation:'Magrahat'};
   openModal('Add New Student', `
   <div class="form-row">
-    <div class="form-group"><label>Full Name *</label>
+    <div class="form-group"><label>Full Name of the Student *</label>
       <input id="asName" placeholder="Student full name" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
     </div>
     <div class="form-group"><label>Roll Number *</label>
@@ -17624,7 +18187,7 @@ function openAddStudent(){
     </div>
   </div>
   <div class="form-row">
-    <div class="form-group"><label>Class *</label>
+    <div class="form-group"><label>Class Applying For *</label>
       <select id="asClass" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
         ${classes.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
       </select>
@@ -17633,48 +18196,17 @@ function openAddStudent(){
       <input id="asSection" placeholder="A / B (optional)" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
     </div>
   </div>
-  <div class="form-row">
-    <div class="form-group"><label>Father's Name</label>
-      <input id="asFather" placeholder="Father's name" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
-    </div>
-    <div class="form-group"><label>Mother's Name</label>
-      <input id="asMother" placeholder="Mother's name" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
-    </div>
+  <div class="form-group"><label>Academic Year (Session)</label>
+    <select id="asSession" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+      ${(ls('sessions')||['2025','2026','2027','2028']).map(s=>`<option ${s===session?'selected':''}>${s}</option>`).join('')}
+    </select>
   </div>
-  <div class="form-row">
-    <div class="form-group"><label>Phone Number</label>
-      <input id="asPhone" type="tel" placeholder="10-digit mobile" maxlength="10" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
-    </div>
-    <div class="form-group"><label>Alt. Phone</label>
-      <input id="asPhone2" type="tel" placeholder="Alternate number" maxlength="10" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
-    </div>
-  </div>
-  <div class="form-row">
-    <div class="form-group"><label>Date of Birth</label>
-      <input id="asDobDisplay" type="text" inputmode="numeric" placeholder="DD/MM/YYYY" maxlength="10" oninput="formatDobInput(this)" onchange="handleDobChange('as')" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
-      <input id="asDob" type="hidden" value="">
-      <div id="asDobInfo" style="margin-top:6px;font-size:11.5px;color:#1a3a6b"></div>
-    </div>
-    <div class="form-group"><label>Gender</label>
-      <select id="asGender" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
-        <option value="">Select</option>
-        <option>Male</option><option>Female</option><option>Other</option>
-      </select>
-    </div>
-  </div>
-  <div class="form-row">
-    <div class="form-group"><label>Religion</label>
-      <input id="asReligion" placeholder="Religion (optional)" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
-    </div>
-    <div class="form-group"><label>Session</label>
-      <select id="asSession" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
-        ${(ls('sessions')||['2025','2026','2027','2028']).map(s=>`<option ${s===session?'selected':''}>${s}</option>`).join('')}
-      </select>
-    </div>
-  </div>
-  <div class="form-group"><label>Address</label>
-    <textarea id="asAddress" rows="2" placeholder="Home address (optional)" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;resize:vertical"></textarea>
-  </div>
+
+  ${renderStudentSectionHTML('as','S',sVals)}
+  ${renderStudentSectionHTML('as','F',sVals)}
+  ${renderStudentSectionHTML('as','AD',sVals)}
+  ${renderStudentSectionHTML('as','AM',sVals)}
+
   <div id="asError" style="display:none;background:#fee2e2;color:#b91c1c;padding:10px;border-radius:8px;font-size:13px;font-weight:700;margin-top:8px"></div>
   `, [
     {label:'<i class="fas fa-user-plus"></i> Save Student', cls:'btn-primary', onclick:'saveNewStudent()'},
@@ -17687,23 +18219,16 @@ function saveNewStudent(){
   const roll    = document.getElementById('asRoll').value.trim();
   const cls     = document.getElementById('asClass').value;
   const section = document.getElementById('asSection').value.trim();
-  const father  = document.getElementById('asFather').value.trim();
-  const mother  = document.getElementById('asMother').value.trim();
-  const phone   = document.getElementById('asPhone').value.trim();
-  const phone2  = document.getElementById('asPhone2').value.trim();
-  const dob     = document.getElementById('asDob').value;
-  const gender  = document.getElementById('asGender').value;
-  const religion= document.getElementById('asReligion').value.trim();
   const session = document.getElementById('asSession').value;
-  const address = document.getElementById('asAddress').value.trim();
   const errEl   = document.getElementById('asError');
 
-  if(!name){ errEl.style.display='block'; errEl.textContent='Student name is required.'; return; }
-  if(!roll){ errEl.style.display='block'; errEl.textContent='Roll number is required.'; return; }
-  if(document.getElementById('asDobDisplay').value.trim() && !dob){ errEl.style.display='block'; errEl.textContent='Date of Birth must be a valid date in DD/MM/YYYY format.'; return; }
+  if(!name){ errEl.style.display='block'; errEl.textContent='Full Name of the Student is required.'; return; }
+  if(!roll){ errEl.style.display='block'; errEl.textContent='Roll Number is required.'; return; }
+
+  const {values,error} = collectStudentFields('as');
+  if(error){ errEl.style.display='block'; errEl.textContent=error; return; }
 
   const students = ls('students')||[];
-  // Check duplicate roll in same class+session
   const dup = students.find(s=>s.session===session&&s.class===cls&&String(s.roll)===String(roll));
   if(dup){ errEl.style.display='block'; errEl.textContent=`Roll ${roll} already exists in ${cls} for session ${session}.`; return; }
 
@@ -17712,8 +18237,7 @@ function saveNewStudent(){
     studentId: genStudentID(),
     name, roll: parseInt(roll)||roll,
     class: cls, section, session,
-    fatherName: father, motherName: mother,
-    phone, phone2, dob, gender, religion, address,
+    ...values,
     createdAt: today()
   };
   students.push(newStudent);
@@ -17728,9 +18252,10 @@ function openEditStudent(id){
   const s = students.find(x=>x.id===id);
   if(!s){ toast('Student not found','error'); return; }
   const classes = getAllClasses();
+  const sVals=Object.assign({district:'SOUTH TWENTY FOUR PARGANAS',block:'Magrahat-II',policeStation:'Magrahat'},s);
   openModal(`Edit Student — ${esc(s.name)}`, `
   <div class="form-row">
-    <div class="form-group"><label>Full Name *</label>
+    <div class="form-group"><label>Full Name of the Student *</label>
       <input id="esName" value="${esc(s.name)}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
     </div>
     <div class="form-group"><label>Roll Number *</label>
@@ -17738,7 +18263,7 @@ function openEditStudent(id){
     </div>
   </div>
   <div class="form-row">
-    <div class="form-group"><label>Class *</label>
+    <div class="form-group"><label>Class Applying For *</label>
       <select id="esClass" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
         ${classes.map(c=>`<option ${c===s.class?'selected':''}>${esc(c)}</option>`).join('')}
       </select>
@@ -17747,50 +18272,17 @@ function openEditStudent(id){
       <input id="esSection" value="${esc(s.section||'')}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
     </div>
   </div>
-  <div class="form-row">
-    <div class="form-group"><label>Father's Name</label>
-      <input id="esFather" value="${esc(s.fatherName||'')}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
-    </div>
-    <div class="form-group"><label>Mother's Name</label>
-      <input id="esMother" value="${esc(s.motherName||'')}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
-    </div>
+  <div class="form-group"><label>Academic Year (Session)</label>
+    <select id="esSession" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+      ${(ls('sessions')||['2025','2026','2027','2028']).map(sess=>`<option ${sess===s.session?'selected':''}>${sess}</option>`).join('')}
+    </select>
   </div>
-  <div class="form-row">
-    <div class="form-group"><label>Phone Number</label>
-      <input id="esPhone" type="tel" value="${esc(s.phone||'')}" maxlength="10" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
-    </div>
-    <div class="form-group"><label>Alt. Phone</label>
-      <input id="esPhone2" type="tel" value="${esc(s.phone2||'')}" maxlength="10" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
-    </div>
-  </div>
-  <div class="form-row">
-    <div class="form-group"><label>Date of Birth</label>
-      <input id="esDobDisplay" type="text" inputmode="numeric" placeholder="DD/MM/YYYY" maxlength="10" value="${s.dob?dobISOToDMY(s.dob):''}" oninput="formatDobInput(this)" onchange="handleDobChange('es')" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
-      <input id="esDob" type="hidden" value="${s.dob||''}">
-      <div id="esDobInfo" style="margin-top:6px;font-size:11.5px;color:#1a3a6b">${dobInfoHTML(s.dob||'')}</div>
-    </div>
-    <div class="form-group"><label>Gender</label>
-      <select id="esGender" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
-        <option value="">Select</option>
-        <option ${s.gender==='Male'?'selected':''}>Male</option>
-        <option ${s.gender==='Female'?'selected':''}>Female</option>
-        <option ${s.gender==='Other'?'selected':''}>Other</option>
-      </select>
-    </div>
-  </div>
-  <div class="form-row">
-    <div class="form-group"><label>Religion</label>
-      <input id="esReligion" value="${esc(s.religion||'')}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
-    </div>
-    <div class="form-group"><label>Session</label>
-      <select id="esSession" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
-        ${(ls('sessions')||['2025','2026','2027','2028']).map(sess=>`<option ${sess===s.session?'selected':''}>${sess}</option>`).join('')}
-      </select>
-    </div>
-  </div>
-  <div class="form-group"><label>Address</label>
-    <textarea id="esAddress" rows="2" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;resize:vertical">${esc(s.address||'')}</textarea>
-  </div>
+
+  ${renderStudentSectionHTML('es','S',sVals)}
+  ${renderStudentSectionHTML('es','F',sVals)}
+  ${renderStudentSectionHTML('es','AD',sVals)}
+  ${renderStudentSectionHTML('es','AM',sVals)}
+
   <div id="esError" style="display:none;background:#fee2e2;color:#b91c1c;padding:10px;border-radius:8px;font-size:13px;font-weight:700;margin-top:8px"></div>
   `, [
     {label:'<i class="fas fa-save"></i> Update Student', cls:'btn-primary', onclick:`saveEditStudent('${id}')`},
@@ -17803,22 +18295,16 @@ function saveEditStudent(id){
   const roll    = document.getElementById('esRoll').value.trim();
   const cls     = document.getElementById('esClass').value;
   const section = document.getElementById('esSection').value.trim();
-  const father  = document.getElementById('esFather').value.trim();
-  const mother  = document.getElementById('esMother').value.trim();
-  const phone   = document.getElementById('esPhone').value.trim();
-  const phone2  = document.getElementById('esPhone2').value.trim();
-  const dob     = document.getElementById('esDob').value;
-  const gender  = document.getElementById('esGender').value;
-  const religion= document.getElementById('esReligion').value.trim();
   const session = document.getElementById('esSession').value;
-  const address = document.getElementById('esAddress').value.trim();
   const errEl   = document.getElementById('esError');
 
-  if(!name){ errEl.style.display='block'; errEl.textContent='Student name is required.'; return; }
-  if(!roll){ errEl.style.display='block'; errEl.textContent='Roll number is required.'; return; }
+  if(!name){ errEl.style.display='block'; errEl.textContent='Full Name of the Student is required.'; return; }
+  if(!roll){ errEl.style.display='block'; errEl.textContent='Roll Number is required.'; return; }
+
+  const {values,error} = collectStudentFields('es');
+  if(error){ errEl.style.display='block'; errEl.textContent=error; return; }
 
   const students = ls('students')||[];
-  // Check duplicate roll in same class+session (excluding self)
   const dup = students.find(s=>s.id!==id&&s.session===session&&s.class===cls&&String(s.roll)===String(roll));
   if(dup){ errEl.style.display='block'; errEl.textContent=`Roll ${roll} already exists in ${cls} for session ${session}.`; return; }
 
@@ -17829,8 +18315,7 @@ function saveEditStudent(id){
     ...students[idx],
     name, roll: parseInt(roll)||roll,
     class: cls, section, session,
-    fatherName: father, motherName: mother,
-    phone, phone2, dob, gender, religion, address
+    ...values
   };
   ss('students', students);
   closeModal();
@@ -19005,7 +19490,7 @@ function switchProfileTab(tabId, btn){
 // switchFeeTab — handles all fee tab IDs including Full Package
 function switchFeeTab(id, btn){
   ['ftAdm','ftMonthly','ftExam','ftHistory',
-   'ftAdm8','ftMonthly8','ftExam8','ftFullYear8','ftHistory8'].forEach(t=>{
+   'ftAdm8','ftMonthly8','ftExam8','ftFullYear8','ftWallet8','ftHistory8'].forEach(t=>{
     const el=document.getElementById(t);
     if(el) el.style.display='none';
   });
