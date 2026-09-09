@@ -7,6 +7,8 @@
 <title>Children's Paradise School - ERP v23</title>
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;600;700;800;900&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -1471,6 +1473,19 @@ const STUDENT_SECTION_HEADINGS={
   AM:'ADMISSION DETAILS'
 };
 function fieldElId(prefix,key){ return prefix+key.charAt(0).toUpperCase()+key.slice(1); }
+// Profile completeness — how many of the optional detail fields (beyond Name/Roll/Class) are actually filled in.
+function calcProfileCompletion(student){
+  const total = STUDENT_FIELD_SCHEMA.length;
+  let filled = 0;
+  const missing = [];
+  STUDENT_FIELD_SCHEMA.forEach(f=>{
+    const v = student[f.key];
+    if(v!==undefined && v!==null && String(v).trim()!==''){ filled++; }
+    else { missing.push(f.label); }
+  });
+  const pct = total ? Math.round((filled/total)*100) : 100;
+  return {pct, filled, total, missing};
+}
 function renderStudentFieldHTML(prefix,f,currentValue,allVals){
   const id=fieldElId(prefix,f.key);
   const req=f.required?' *':'';
@@ -1533,7 +1548,7 @@ function collectStudentFields(prefix){
   }
   for(const f of STUDENT_FIELD_SCHEMA){
     const v=values[f.key];
-    if(f.required && !v) return {values,error:`${f.label} is required.`};
+    const id=fieldElId(prefix,f.key);
     if(v && f.type==='aadhaar' && !/^\d{12}$/.test(v)) return {values,error:'Aadhaar No of Child must be exactly 12 digits.'};
     if(v && f.type==='pincode' && !/^\d{6}$/.test(v)) return {values,error:'Pin Code must be exactly 6 digits.'};
     if(v && f.type==='phone10' && !isValidPhone10(v)) return {values,error:`${f.label} must be exactly 10 digits.`};
@@ -1668,6 +1683,18 @@ function findGovClassForSchoolClass(cls){
   const r=rules.find(r=>(r.schoolClasses||[]).includes(cls));
   return r?r.govClass:null;
 }
+// Turns the age-rule engine into a plain statement for a given school class + session year,
+// e.g. "Class 3: students born in 2017 are eligible" — used on Class-wise Government Report (screen + print).
+function getGovAgeRuleTextForClass(cls, sessionYear){
+  const r = getGovAgeRules().find(rule=>(rule.schoolClasses||[]).includes(cls));
+  if(!r) return null;
+  const birthYear = sessionYear - r.minAge;
+  return {
+    rule: r,
+    birthYear,
+    text: `${r.govClass} (${esc(cls)}): students born in ${birthYear} are eligible — age ${r.minAge}\u2013${r.maxAge-1} as of 1 Jan ${sessionYear}.`
+  };
+}
 // Returns {age, ageAppropriateClass, schoolMappedClass, mismatch, applicable}
 function computeAgeVerification(student,sessionYear){
   const age=ageAsOfJan1(student.dob,sessionYear);
@@ -1690,6 +1717,7 @@ function defaultGovRecord(){
   return {
     status:'FORM_NOT_SUBMITTED',
     banglarShikshaId:'',
+    schoolName:'',
     remarks:'',
     // Age-verification fields (separate concern, see computeAgeVerification above)
     governmentPortalClass:'', ageDifferenceReason:'', ageDifferenceExplanation:'', ageVerificationStatus:'Not Reviewed', ageSupportingDocNote:'',
@@ -1904,6 +1932,7 @@ const NAV_ALL=[
   {id:'schoolToday',icon:'fas fa-broadcast-tower',label:'School Today',roles:['principal']},
   {id:'students',icon:'fas fa-user-graduate',label:'Students',roles:['principal','accountant']},
   {id:'needAttention',icon:'fas fa-exclamation-triangle',label:'Students Need Attention',roles:['principal','teacher']},
+  {id:'panchayatMap',icon:'fas fa-map-marked-alt',label:'Panchayat Admission Map',roles:['principal']},
   {id:'teachers',icon:'fas fa-chalkboard-teacher',label:'Teachers',roles:['principal']},
   {id:'feeCollection',icon:'fas fa-hand-holding-usd',label:'Fee Collection',roles:['principal','accountant']},
   {id:'dueReport',icon:'fas fa-file-invoice-dollar',label:'Due Report',roles:['principal','accountant']},
@@ -1931,7 +1960,6 @@ const NAV_ALL=[
   {id:'admitCard',icon:'fas fa-id-badge',label:'Admit Cards',roles:['principal']},
   {id:'performance',icon:'fas fa-chart-line',label:'Performance Analysis',roles:['principal','teacher']},
   {id:'top10',icon:'fas fa-trophy',label:'Top 10 Result Board',roles:['principal','teacher']},
-  {id:'timetable',icon:'fas fa-th',label:'Timetable',roles:['principal','teacher']},
   {id:'examMgmt',icon:'fas fa-clipboard-list',label:'Exam Management',roles:['principal','teacher']},
   {id:'hallTicket',icon:'fas fa-id-badge',label:'Hall Tickets',roles:['principal']},
   {id:'lessonPlan',icon:'fas fa-book-open',label:'Lesson Planning',roles:['principal','teacher']},
@@ -1957,8 +1985,8 @@ function buildNav(){
   const role = currentUser.role;
   const groups = [
     { label:'📊 Overview', pages:['dashboard','schoolToday','studentSearch'] },
-    { label:'👨‍🎓 Students & Parents', pages:['students','needAttention','promotion','conduct','coCurricular','ptmBooking'] },
-    { label:'📚 Academic', pages:['attendance','monthlyAttendance','examRegister','teacherMarks','marks','reportCard','performance','top10','timetable','routine','syllabus','examMgmt','hallTicket','admitCard','lessonPlan','logbook'] },
+    { label:'👨‍🎓 Students & Parents', pages:['students','needAttention','panchayatMap','promotion','conduct','coCurricular','ptmBooking'] },
+    { label:'📚 Academic', pages:['attendance','monthlyAttendance','examRegister','teacherMarks','marks','reportCard','performance','top10','routine','syllabus','examMgmt','hallTicket','admitCard','lessonPlan','logbook'] },
     { label:'👥 Staff', pages:['teachers','substitute'] },
     { label:'💰 Finance', pages:['feeCollection','dueReport','dueNotice','feeRegister','cashBook','feeSettings','allTransactions','finance','stock'] },
     { label:'📢 Communication', pages:['notices','calendar','helpdesk','complaints','documents'] },
@@ -1984,7 +2012,7 @@ function buildNav(){
 
 function showPage(pageId){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.page===pageId));
-  const titles={dashboard:'Dashboard',schoolToday:'School Today',substituteHistory:'Substitute History',students:'Student Management',needAttention:'Students Need Attention',teachers:'Teacher Management',feeCollection:'Fee Collection',feeSettings:'Fee Settings',dueReport:'Due Report',dueNotice:'Due Notice Cards',feeRegister:'Fee Register',cashBook:'Society Cash Book',attendance:'Daily Attendance',examRegister:'Student Exam Register',marks:'Marks & Results',reportCard:'Report Card',routine:'Class Routine',notices:'Notice Board',calendar:'School Calendar',stock:'Stock & Shop',finance:'Financial Analysis',promotion:'Session Promotion',idCard:'ID Card Generator',dataManagement:'Data Management',settings:'Settings',academicSettings:'Class Manager & Academic Settings',sessionSettings:'Session Settings',syllabus:'Syllabus Manager',admitCard:'Admit Cards',performance:'Performance Analysis',monthlyAttendance:'Monthly Attendance Entry',allTransactions:'All Transactions',top10:'🏆 Top 10 Result Board',timetable:'📅 Timetable Management',examMgmt:'📋 Exam Management',hallTicket:'🎫 Hall Ticket Generator',lessonPlan:'📖 Lesson Planning',logbook:'📓 Teaching Logbook',ptmBooking:'🤝 PTM Booking',conduct:'🛡️ Conduct & Discipline',coCurricular:'🏅 Co-Curricular Activities',substitute:'🔄 Substitute Teachers',helpdesk:'🎧 Helpdesk',complaints:'💬 Complaints',documents:'📁 Documents',assets:'💻 Asset Register',govDashboard:'🏛 Government ID Dashboard',govClassRecords:'🏛 Class-wise Government Records',govFollowUp:'⚠️ Pending Government ID Follow-up',govAgeVerification:'🎂 Age & Government Class Verification',studentSearch:'⚡ Fast Search'};
+  const titles={dashboard:'Dashboard',schoolToday:'School Today',substituteHistory:'Substitute History',students:'Student Management',needAttention:'Students Need Attention',teachers:'Teacher Management',feeCollection:'Fee Collection',feeSettings:'Fee Settings',dueReport:'Due Report',dueNotice:'Due Notice Cards',feeRegister:'Fee Register',cashBook:'Society Cash Book',attendance:'Daily Attendance',examRegister:'Student Exam Register',marks:'Marks & Results',reportCard:'Report Card',routine:'Class Routine',notices:'Notice Board',calendar:'School Calendar',stock:'Stock & Shop',finance:'Financial Analysis',promotion:'Session Promotion',idCard:'ID Card Generator',dataManagement:'Data Management',settings:'Settings',academicSettings:'Class Manager & Academic Settings',sessionSettings:'Session Settings',syllabus:'Syllabus Manager',admitCard:'Admit Cards',performance:'Performance Analysis',monthlyAttendance:'Monthly Attendance Entry',allTransactions:'All Transactions',top10:'🏆 Top 10 Result Board',examMgmt:'📋 Exam Management',hallTicket:'🎫 Hall Ticket Generator',lessonPlan:'📖 Lesson Planning',logbook:'📓 Teaching Logbook',ptmBooking:'🤝 PTM Booking',conduct:'🛡️ Conduct & Discipline',coCurricular:'🏅 Co-Curricular Activities',substitute:'🔄 Substitute Teachers',helpdesk:'🎧 Helpdesk',complaints:'💬 Complaints',documents:'📁 Documents',assets:'💻 Asset Register',govDashboard:'🏛 Government ID Dashboard',govClassRecords:'🏛 Class-wise Government Records',govFollowUp:'⚠️ Pending Government ID Follow-up',govAgeVerification:'🎂 Age & Government Class Verification',studentSearch:'⚡ Fast Search'};
   document.getElementById('topbarTitle').textContent=titles[pageId]||pageId;
   const content=document.getElementById('mainContent');
   // Reset any leftover transitions, set opacity 0, render, then fade in
@@ -2034,6 +2062,7 @@ function renderPage(p){
     case 'substituteHistory': return renderSubstituteHistory();
     case 'students': return renderStudents();
     case 'needAttention': return renderNeedAttention();
+    case 'panchayatMap': return renderPanchayatMap();
     case 'teachers': return renderTeachers();
     case 'feeCollection': return renderFeeCollection();
     case 'dueReport': return renderDueReport();
@@ -2061,7 +2090,6 @@ function renderPage(p){
     case 'admitCard': return renderAdmitCard();
     case 'performance': return renderPerformance();
     case 'top10': return renderTop10();
-    case 'timetable': return renderTimetable();
     case 'examMgmt': return renderExamMgmt();
     case 'hallTicket': return renderHallTicket();
     case 'lessonPlan': return renderLessonPlan();
@@ -2371,7 +2399,7 @@ function getSchoolWideMarksPending(){
   TERMS.forEach(tm=>{ if(Object.values(marks).some(sm=>Object.keys(sm[tm]||{}).length>0)) activeTerm=tm; });
   const list=[];
   teachers.forEach(t=>{
-    (t.teachAssignments||[]).forEach(ta=>{
+    getEffectiveTeacherAssignments(t).forEach(ta=>{
       const clsStudents=students.filter(s=>s.session===session&&s.class===ta.class);
       if(!clsStudents.length) return;
       const entered=clsStudents.filter(s=>((marks[s.id]||{})[activeTerm]||{})[ta.subject]!==undefined).length;
@@ -3062,7 +3090,7 @@ function renderTeacherDashboard(){
   const tName = t.name||currentUser.name||'Teacher';
   const myClasses = t.classes||[];
   const mySubjects = t.subjects||[];
-  const teachAssignments = t.teachAssignments||[];
+  const teachAssignments = getEffectiveTeacherAssignments(t);
   const session = getActiveSession();
   const allStudents = ls('students')||[];
   const myStudents = allStudents.filter(s=>s.session===session&&myClasses.includes(s.class));
@@ -3206,12 +3234,23 @@ function renderTeacherDashboard(){
   const pendingSubCount = mySubAssignments.filter(a=>!a.teacherViewed).length;
   const bellCount = pendingList.length + (attendancePendingToday?1:0) + decliningSubs.length + pendingFollowUpRequests.length + pendingSubCount;
 
+  // Accurate "Class Teacher" status — only true if this teacher takes Period 1 for that class in the routine
+  const classTeacherMap = getClassTeacherMap();
+  const myClassTeacherOf = Object.entries(classTeacherMap).filter(([cls,name])=>name===tName).map(([cls])=>cls);
+  const mySubjectsFromRoutine = [...new Set(teachAssignments.map(a=>a.subject))];
+  const dashSubtitleClassPart = myClassTeacherOf.length
+    ? `${esc(myClassTeacherOf.join(', '))} Class Teacher`
+    : (myClasses.length ? `${esc(myClasses.join(', '))} Teacher` : 'Teacher');
+  const dashSubtitleSubjPart = mySubjectsFromRoutine.length
+    ? ' • '+esc(mySubjectsFromRoutine.join(', '))
+    : (mySubjects.length ? ' • '+esc(mySubjects.join(', ')) : '');
+
   return `
   <div class="card" style="background:linear-gradient(135deg,#1a3a6b,#3b82f6);color:white;margin-bottom:20px;border:none">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
       <div>
         <div style="font-size:20px;font-weight:900">👨‍🏫 ${greeting}, ${esc(tName)}</div>
-        <div style="font-size:13px;opacity:.9;margin-top:4px">${esc(myClasses.join(', ')||'—')} Teacher${mySubjects.length?' • '+esc(mySubjects.join(', ')):''}</div>
+        <div style="font-size:13px;opacity:.9;margin-top:4px">${dashSubtitleClassPart}${dashSubtitleSubjPart}</div>
       </div>
       <div style="background:rgba(255,255,255,.2);padding:8px 14px;border-radius:10px;font-weight:800;font-size:13px;display:flex;align-items:center;gap:6px">
         <i class="fas fa-bell"></i> ${bellCount}
@@ -3252,7 +3291,10 @@ function renderTeacherDashboard(){
 
   <div class="dash-grid" id="dashGrids">
     <div class="card">
-      <div class="card-title"><i class="fas fa-calendar-day"></i> Today's Routine</div>
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+        <span><i class="fas fa-calendar-day"></i> Today's Routine</span>
+        <a href="javascript:void(0)" onclick="showPage('routine')" style="font-size:11px;font-weight:800;color:var(--primary)">📅 Full Week &rarr;</a>
+      </div>
       ${todaySchedule.length?todaySchedule.map(p=>`
         <div style="display:flex;justify-content:space-between;align-items:center;padding:9px;background:#f8faff;border-radius:8px;margin-bottom:7px">
           <span style="font-weight:700;font-size:13px">Period ${p.period+1} &bull; ${esc(p.cls)}</span>
@@ -3413,6 +3455,8 @@ function renderGovClassRecords(){
   const filter=window._govFilterBucket||''; // '' = show all
   const visibleRows = filter ? rows.filter(r=>r.b===filter) : rows;
   const rowBg={green:'#f0fdf4',yellow:'#fefce8',blue:'#eff6ff',red:'#fef2f2'};
+  const sessionYear = parseInt(session)||new Date().getFullYear();
+  const ageRule = getGovAgeRuleTextForClass(selClass, sessionYear);
 
   return `
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px">
@@ -3421,6 +3465,14 @@ function renderGovClassRecords(){
       ${classes.map(c=>`<option value="${esc(c)}" ${c===selClass?'selected':''}>${esc(c)}</option>`).join('')}
     </select>
   </div>
+
+  ${ageRule?`<div style="background:linear-gradient(135deg,#fffbeb,#fef3c7);border:1.5px solid #fde68a;border-radius:12px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:10px">
+    <div style="font-size:22px">📋</div>
+    <div>
+      <div style="font-size:11px;font-weight:800;color:#92400e;text-transform:uppercase;letter-spacing:.4px">Government Age Rule</div>
+      <div style="font-size:13.5px;font-weight:700;color:#78350f;margin-top:2px">${ageRule.text}</div>
+    </div>
+  </div>`:''}
 
   <div style="background:white;border-radius:14px;border:1.5px solid #e8eef5;padding:14px 16px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
     <div style="font-size:14px;font-weight:800;color:#0d1f3c">${esc(selClass)} — Total ${students.length} Students</div>
@@ -3447,25 +3499,30 @@ function renderGovClassRecords(){
 
   <div style="background:white;border-radius:14px;border:1.5px solid #e8eef5;overflow-x:auto">
     ${!visibleRows.length?emptyState('📭','No students in this category',filter?'Try clearing the filter above':'No students found'):`
-    <table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px">
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:980px">
       <thead><tr style="background:#1a3a6b;text-align:left;color:white">
-        <th style="padding:9px 10px">Roll</th><th style="padding:9px 10px">Student Name</th><th style="padding:9px 10px">Phone</th>
-        <th style="padding:9px 10px">Government ID</th>
+        <th style="padding:9px 10px">Roll</th><th style="padding:9px 10px">Student Name</th><th style="padding:9px 10px">Date of Birth</th><th style="padding:9px 10px">Phone</th>
+        <th style="padding:9px 10px">Government ID</th><th style="padding:9px 10px">School Name</th>
         <th style="padding:9px 10px">Status</th><th style="padding:9px 10px">Remarks</th><th style="padding:9px 10px">Action</th>
       </tr></thead>
       <tbody>
-        ${visibleRows.map(({s,rec,b})=>`<tr style="border-top:1px solid #f0f4ff;background:${rowBg[b]}">
+        ${visibleRows.map(({s,rec,b})=>{
+          const dobYear = s.dob ? new Date(s.dob).getFullYear() : null;
+          const ageMismatch = ageRule && dobYear && dobYear !== ageRule.birthYear;
+          return `<tr style="border-top:1px solid #f0f4ff;background:${rowBg[b]}">
           <td style="padding:8px 10px;font-weight:700">${s.roll||'—'}</td>
           <td style="padding:8px 10px;font-weight:700;color:var(--primary);white-space:nowrap">${esc(s.name)}</td>
+          <td style="padding:8px 10px;white-space:nowrap;${ageMismatch?'color:#b91c1c;font-weight:800':''}">${s.dob?fmtDate(s.dob):'—'}${ageMismatch?` <span title="Expected birth year ${ageRule.birthYear}">⚠️</span>`:''}</td>
           <td style="padding:8px 10px;color:#6b7a99">${esc(s.phone||'—')}</td>
           <td style="padding:8px 10px">${esc(rec.banglarShikshaId||'—')}</td>
+          <td style="padding:8px 10px;color:#6b7a99">${esc(rec.schoolName||'—')}</td>
           <td style="padding:8px 10px">${govStatusBadge(rec.status)}</td>
           <td style="padding:8px 10px;color:#6b7a99;max-width:200px;white-space:normal">${esc(rec.remarks||'—')}</td>
           <td style="padding:8px 10px"><div style="display:flex;gap:5px;flex-wrap:nowrap">
             <button class="btn btn-xs btn-primary" onclick="openGovEditor('${s.id}')" title="View / Edit"><i class="fas fa-edit"></i></button>
             ${s.phone?`<button class="btn btn-xs" style="background:#22c55e;color:white;border:none" onclick="sendGovParentWhatsAppQuick('${s.id}')" title="Send WhatsApp to parent now"><i class="fab fa-whatsapp"></i></button>`:''}
           </div></td>
-        </tr>`).join('')}
+        </tr>`;}).join('')}
       </tbody>
     </table>`}
   </div>`;
@@ -3476,10 +3533,10 @@ function exportGovClassCSV(){
   const cls=window._govSelClass||'';
   const students=(ls('students')||[]).filter(s=>s.session===session&&s.class===cls).sort((a,b)=>(a.roll||0)-(b.roll||0));
   const all=getAllGovRecords();
-  const rows=[['Roll','Student Name','Phone','Government ID','Status','Remarks']];
+  const rows=[['Roll','Student Name','Date of Birth','Phone','Government ID','School Name','Status','Remarks']];
   students.forEach(s=>{
     const rec=all[s.id]||defaultGovRecord();
-    rows.push([s.roll,s.name,s.phone,rec.banglarShikshaId||'',(GOV_STATUS_META[rec.status]||{}).label||rec.status,rec.remarks]);
+    rows.push([s.roll,s.name,s.dob?fmtDate(s.dob):'',s.phone,rec.banglarShikshaId||'',rec.schoolName||'',(GOV_STATUS_META[rec.status]||{}).label||rec.status,rec.remarks]);
   });
   const csv=rows.map(r=>r.map(c=>{const v=String(c===null||c===undefined?'':c);return/[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\r\n');
   const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
@@ -3498,6 +3555,8 @@ function printClassGovReport(){
   const all=getAllGovRecords();
   const buckets={green:[],yellow:[],blue:[],red:[]};
   const rows=students.map(s=>{ const rec=all[s.id]||defaultGovRecord(); const b=govBucket(rec); buckets[b].push(s); return {s,rec,b}; });
+  const sessionYear = parseInt(session)||new Date().getFullYear();
+  const ageRule = getGovAgeRuleTextForClass(cls, sessionYear);
   const w=window.open('','_blank');
   w.document.write(`<!DOCTYPE html><html><head><title>Government Report - ${esc(cls)}</title>
   <style>
@@ -3510,6 +3569,7 @@ function printClassGovReport(){
     td{padding:6px 8px;border:1px solid #d0dbe8}
     .summary{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:14px 0}
     .summary div{border:1px solid #d0dbe8;border-radius:8px;padding:8px;text-align:center}
+    .agerule{background:#fef3c7;border:1.5px solid #fde68a;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#78350f;font-weight:700}
     .footer{margin-top:34px;display:flex;justify-content:space-between;font-size:11.5px;border-top:1px solid #d0dbe8;padding-top:16px}
     @page{size:A4;margin:15mm}
   </style></head><body>
@@ -3519,6 +3579,7 @@ function printClassGovReport(){
     <h2>CLASS-WISE GOVERNMENT STUDENT RECORD</h2>
     <div style="font-size:11px;color:#6b7a99;margin-top:4px">Class: ${esc(cls)} &nbsp;|&nbsp; Session: ${esc(session)} &nbsp;|&nbsp; Date: ${esc(fmtDate(today()))}</div>
   </div>
+  ${ageRule?`<div class="agerule">📋 Government Age Rule — ${ageRule.text}</div>`:''}
   <div class="summary">
     <div><b>${students.length}</b><br>Total Students</div>
     <div>🟢 <b>${buckets.green.length}</b><br>ID Created</div>
@@ -3526,8 +3587,13 @@ function printClassGovReport(){
     <div>🔵 <b>${buckets.blue.length}</b><br>Existing ID in Govt. School</div>
     <div>🔴 <b>${buckets.red.length}</b><br>Form Not Submitted</div>
   </div>
-  <table><thead><tr><th>Roll</th><th>Student Name</th><th>Phone</th><th>Government ID</th><th>Status</th><th>Remarks</th></tr></thead>
-  <tbody>${rows.map(({s,rec})=>`<tr><td>${s.roll||'—'}</td><td>${esc(s.name)}</td><td>${esc(s.phone||'—')}</td><td>${esc(rec.banglarShikshaId||'—')}</td><td>${esc((GOV_STATUS_META[rec.status]||{}).label||rec.status)}</td><td>${esc(rec.remarks||'—')}</td></tr>`).join('')}</tbody></table>
+  <table><thead><tr><th>Roll</th><th>Student Name</th><th>Date of Birth</th><th>Phone</th><th>Government ID</th><th>School Name</th><th>Status</th><th>Remarks</th></tr></thead>
+  <tbody>${rows.map(({s,rec})=>{
+    const dobYear = s.dob ? new Date(s.dob).getFullYear() : null;
+    const ageMismatch = ageRule && dobYear && dobYear !== ageRule.birthYear;
+    return `<tr><td>${s.roll||'—'}</td><td>${esc(s.name)}</td><td${ageMismatch?' style="color:#b91c1c;font-weight:800"':''}>${s.dob?esc(fmtDate(s.dob)):'—'}${ageMismatch?' ⚠️':''}</td><td>${esc(s.phone||'—')}</td><td>${esc(rec.banglarShikshaId||'—')}</td><td>${esc(rec.schoolName||'—')}</td><td>${esc((GOV_STATUS_META[rec.status]||{}).label||rec.status)}</td><td>${esc(rec.remarks||'—')}</td></tr>`;
+  }).join('')}</tbody></table>
+  ${ageRule?`<div style="font-size:10px;color:#94a3b8;margin-top:6px">⚠️ marks a student whose Date of Birth does not match the expected birth year for this class.</div>`:''}
   <div class="footer">
     <div>Office Signature: _______________</div>
     <div>Principal Signature: _______________</div>
@@ -3891,13 +3957,20 @@ function openGovEditor(studentId){
   const s=students.find(x=>x.id===studentId);
   if(!s) return;
   const rec=getGovRecord(studentId);
+  const showSchoolName = rec.status==='ID_CREATED' || rec.status==='EXISTING_ID_IN_GOVT_SCHOOL';
+  const isLocked = rec.status==='ID_CREATED';
+  const schoolNameVal = isLocked ? "Children's Paradise" : (rec.schoolName||'');
   openModal(`Government Record — ${esc(s.name)}`,`
     <div style="font-size:11.5px;color:#6b7a99;margin-bottom:12px">${esc(s.class)} · Roll ${s.roll||'—'} · ${esc(s.studentId||'')}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="form-group" style="grid-column:1/-1"><label>Government Record Status</label>
-        <select id="govStatus" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)">
+        <select id="govStatus" onchange="govStatusChanged()" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)">
           ${Object.keys(GOV_STATUS_META).map(k=>`<option value="${k}" ${rec.status===k?'selected':''}>${GOV_STATUS_META[k].icon} ${GOV_STATUS_META[k].label}</option>`).join('')}
         </select>
+      </div>
+      <div class="form-group" style="grid-column:1/-1;${showSchoolName?'':'display:none'}" id="govSchoolNameWrap">
+        <label>School Name${isLocked?' <span style="font-weight:400;color:#94a3b8">(this school)</span>':''}</label>
+        <input id="govSchoolName" value="${esc(schoolNameVal)}" ${isLocked?'readonly':''} placeholder="${rec.status==='EXISTING_ID_IN_GOVT_SCHOOL'?'Name of the government school':''}" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border);${isLocked?'background:#f1f5f9;color:#64748b':''}">
       </div>
       <div class="form-group" style="grid-column:1/-1"><label>Government ID (Banglar Shiksha) — optional</label><input id="govBanglar" value="${esc(rec.banglarShikshaId)}" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)"></div>
       <div class="form-group" style="grid-column:1/-1"><label>Remarks</label><textarea id="govRemarks" rows="2" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)">${esc(rec.remarks)}</textarea></div>
@@ -3908,10 +3981,34 @@ function openGovEditor(studentId){
     </div>
   `,[]);
 }
+// Toggles/auto-fills the School Name field when the status dropdown changes.
+function govStatusChanged(){
+  const status=document.getElementById('govStatus')?.value;
+  const wrap=document.getElementById('govSchoolNameWrap');
+  const input=document.getElementById('govSchoolName');
+  if(!wrap||!input) return;
+  if(status==='ID_CREATED'){
+    wrap.style.display='';
+    input.value="Children's Paradise";
+    input.readOnly=true;
+    input.style.background='#f1f5f9'; input.style.color='#64748b';
+    input.placeholder='';
+  } else if(status==='EXISTING_ID_IN_GOVT_SCHOOL'){
+    wrap.style.display='';
+    if(input.value==="Children's Paradise") input.value='';
+    input.readOnly=false;
+    input.style.background=''; input.style.color='';
+    input.placeholder='Name of the government school';
+    input.focus();
+  } else {
+    wrap.style.display='none';
+  }
+}
 function submitGovEditor(studentId){
   const patch={
     status:val('govStatus'),
     banglarShikshaId:val('govBanglar'),
+    schoolName:val('govSchoolName'),
     remarks:val('govRemarks')
   };
   saveGovRecord(studentId,patch);
@@ -4187,6 +4284,7 @@ function renderStudentRows(students){
             <div style="font-weight:800;color:#1a3a6b;cursor:pointer;font-size:13px" onclick="openStudentProfile('${s.id}')">${esc(s.name)}</div>
             <div style="font-size:10px;color:#9aa8c0;margin-top:1px">${s.studentId}</div>
             ${s.fatherName?`<div style="font-size:10px;color:#9aa8c0">F: ${esc(s.fatherName)}</div>`:''}
+            ${(()=>{ const pc=calcProfileCompletion(s); if(pc.pct>=100) return ''; const c=pc.pct>=80?'#15803d':pc.pct>=40?'#c9a84c':'#b91c1c'; return `<div style="font-size:9.5px;font-weight:800;color:${c};margin-top:2px">Profile ${pc.pct}%</div>`; })()}
           </div>
         </div>
       </td>
@@ -4244,6 +4342,7 @@ function renderStudentRows(students){
 }
 
 let _filterTimer = null;
+let _feeFilterTimer = null;
 function filterStudents(){
   clearTimeout(_filterTimer);
   _filterTimer = setTimeout(_doFilterStudents, 80);
@@ -11919,6 +12018,72 @@ function exportExamRegisterCSV(){
 //  examRegisterMarks store as the full Exam Register, so everything
 //  stays linked automatically (Report Card, Performance, Top 10).
 // ═══════════════════════════════════════════════════════════════
+// ───────────────────────────────────────────────
+//  ROUTINE-DERIVED TEACHER ASSIGNMENTS — feeds Teacher Marks Entry.
+//  A teacher automatically gets marks-entry access to any class+subject
+//  they're assigned to teach in Class Routine. Whoever takes Period 1
+//  for a class (first day found, Monday first) is that class's "Class
+//  Teacher" and automatically gets ALL subjects of that class, not just
+//  their own — matching how class teachers oversee the whole class.
+// ───────────────────────────────────────────────
+function getClassTeacherMap(){
+  const routine = ls('routine')||{};
+  const classes = getAllClasses();
+  const map = {};
+  classes.forEach(cls=>{
+    for(const day of ROUTINE_DAYS){
+      const cell = ((routine[cls]||{})[day]||{})[0];
+      if(cell && cell.teacher){ map[cls]=cell.teacher; break; }
+    }
+  });
+  return map;
+}
+function getRoutineDerivedAssignments(teacherName){
+  if(!teacherName) return [];
+  const routine = ls('routine')||{};
+  const classes = getAllClasses();
+  const pairs = [];
+  const seen = new Set();
+  const add=(cls,subject,isClassTeacher)=>{
+    if(!subject) return;
+    const key=cls+'|||'+subject;
+    if(seen.has(key)) return;
+    seen.add(key);
+    pairs.push({class:cls, subject, fromRoutine:true, isClassTeacher:!!isClassTeacher});
+  };
+  classes.forEach(cls=>{
+    ROUTINE_DAYS.forEach(day=>{
+      for(let pi=0;pi<5;pi++){
+        const cell=((routine[cls]||{})[day]||{})[pi];
+        if(cell && cell.teacher===teacherName) add(cls, cell.subject);
+      }
+    });
+  });
+  const classTeacherMap = getClassTeacherMap();
+  Object.entries(classTeacherMap).forEach(([cls,tName])=>{
+    if(tName===teacherName){
+      getExamRegisterSubjectNames(cls).forEach(sub=>add(cls, sub, true));
+    }
+  });
+  return pairs;
+}
+
+// Merges a teacher's manually-configured assignments with what Class Routine derives —
+// the single source of truth used everywhere in Teacher Marks Entry (entry screen,
+// collection status overview, pending reminders, Marks Tasks modal).
+function getEffectiveTeacherAssignments(teacher){
+  if(!teacher) return [];
+  const manual = teacher.teachAssignments || [];
+  const routineDerived = getRoutineDerivedAssignments(teacher.name);
+  const seen = new Set(manual.map(a=>a.class+'|||'+a.subject));
+  const merged = [...manual];
+  routineDerived.forEach(a=>{
+    const key=a.class+'|||'+a.subject;
+    if(!seen.has(key)){ seen.add(key); merged.push(a); }
+  });
+  return merged;
+}
+
 function renderTeacherMarks(){
   const teachers = ls('teachers')||[];
   return `
@@ -11927,7 +12092,7 @@ function renderTeacherMarks(){
   </div>
   <div class="card no-print" style="margin-bottom:14px;padding:14px 16px">
     <div style="font-size:12px;color:#1e40af;background:#eff6ff;border-radius:8px;padding:9px 13px;margin-bottom:12px">
-      <i class="fas fa-info-circle"></i> Pick a teacher to see only the class + subject they check copies for, and enter just those marks. To assign which class &amp; subject a teacher handles, edit them from Teachers &rarr; <i class="fas fa-edit"></i>.
+      <i class="fas fa-info-circle"></i> Pick a teacher to see the classes &amp; subjects they can enter marks for — pulled automatically from Class Routine (whatever they're assigned to teach there). Whoever takes <strong>Period 1</strong> of a class is that class's <strong>Class Teacher</strong> and automatically gets every subject for that class, not just their own. You can still manually add extra assignments by editing a teacher from Teachers &rarr; <i class="fas fa-edit"></i>.
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end">
       <div>
@@ -11969,10 +12134,10 @@ function loadTeacherMarksAssignments(){
     return;
   }
   const teacher = (ls('teachers')||[]).find(t=>t.id===teacherId);
-  const assignments = (teacher && teacher.teachAssignments) || [];
+  const assignments = getEffectiveTeacherAssignments(teacher);
   if(!assignments.length){
     assignArea.innerHTML = `<div style="font-size:12px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:9px 13px">
-      <i class="fas fa-exclamation-circle"></i> ${esc(teacher?teacher.name:'This teacher')} has no class/subject assigned yet. Edit them from Teachers and add "Marks Entry Assignments".
+      <i class="fas fa-exclamation-circle"></i> ${esc(teacher?teacher.name:'This teacher')} has no class/subject in Class Routine and none manually assigned yet. Add them to Class Routine, or edit this teacher from Teachers and add "Marks Entry Assignments".
     </div>`;
     const bulkAreaNone = document.getElementById('tmBulkArea');
     if(bulkAreaNone) bulkAreaNone.innerHTML = '';
@@ -11982,7 +12147,7 @@ function loadTeacherMarksAssignments(){
     <div style="font-size:11px;font-weight:800;color:#1a3a6b;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">Their Classes &amp; Subjects — jump to:</div>
     <div style="display:flex;flex-wrap:wrap;gap:8px">
       ${assignments.map((a,i)=>`<a href="#tmSec${i}" style="padding:7px 14px;border-radius:20px;border:2px solid #c9d8ef;background:#fff;color:#1a3a6b;font-weight:800;font-size:12px;text-decoration:none">
-        ${esc(a.class)} &mdash; ${esc(a.subject)}
+        ${esc(a.class)} &mdash; ${esc(a.subject)}${a.isClassTeacher?' <span style="color:#c9a84c">👑 Class Teacher</span>':''}
       </a>`).join('')}
     </div>`;
   window._tmAssignments = assignments;
@@ -12058,7 +12223,7 @@ function buildTeacherMarksSection(a, idx, term, session){
   <div class="card" id="tmSec${idx}" style="padding:16px;margin-bottom:16px;scroll-margin-top:14px">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
       <div>
-        <div style="font-weight:900;color:#1a3a6b;font-size:16px"><i class="fas fa-chalkboard-teacher" style="color:var(--gold);margin-right:6px"></i>${esc(cls)} &mdash; ${esc(sub.label)}</div>
+        <div style="font-weight:900;color:#1a3a6b;font-size:16px"><i class="fas fa-chalkboard-teacher" style="color:var(--gold);margin-right:6px"></i>${esc(cls)} &mdash; ${esc(sub.label)}${a.isClassTeacher?' <span style="font-size:11px;font-weight:800;color:#c9a84c;background:#fffbeb;padding:3px 9px;border-radius:12px;margin-left:6px">👑 Class Teacher</span>':''}</div>
         <div style="font-size:11px;color:#6b7a99;margin-top:3px">
           Full Marks: <strong>${sub.fullT}</strong>${sub.hasOral?` (${sub.fullW} Written + ${sub.fullO} Oral)`:''}
           &nbsp;·&nbsp; ${students.length} students &nbsp;·&nbsp; ${enteredCount}/${students.length} entered
@@ -12466,10 +12631,10 @@ function tmSendReminder(teacherId, cls, subject){
 
 function getAllPendingMarksItems(){
   const term = document.getElementById('tmTerm')?.value||'1';
-  const teachers = (ls('teachers')||[]).filter(t=>t.teachAssignments&&t.teachAssignments.length);
+  const teachers = (ls('teachers')||[]).filter(t=>getEffectiveTeacherAssignments(t).length);
   const items=[];
   teachers.forEach(t=>{
-    t.teachAssignments.forEach(a=>{
+    getEffectiveTeacherAssignments(t).forEach(a=>{
       const subs = getSubjects(a.class, term);
       const sub = subs.find(sb=>sb.label===a.subject);
       if(!sub) return;
@@ -12508,7 +12673,7 @@ function tmRemindAllSequential(){
 }
 
 function tmGenerateAllTeachers(){
-  const teachers = (ls('teachers')||[]).filter(t=>t.teachAssignments&&t.teachAssignments.length);
+  const teachers = (ls('teachers')||[]).filter(t=>getEffectiveTeacherAssignments(t).length);
   if(!teachers.length){ toast('No teachers with class/subject assignments found','error'); return; }
   if(typeof XLSX==='undefined'){ toast('Excel library failed to load — check your internet connection','error'); return; }
   const teacherSel = document.getElementById('tmTeacher');
@@ -12519,7 +12684,7 @@ function tmGenerateAllTeachers(){
     if(i>=teachers.length){ toast(`✅ Generated ${teachers.length} teacher workbook(s)`); return; }
     const t = teachers[i];
     teacherSel.value = t.id;
-    window._tmAssignments = t.teachAssignments;
+    window._tmAssignments = getEffectiveTeacherAssignments(t);
     const built = tmBuildCombinedWorkbook();
     if(built){
       const fname = `${t.name.replace(/\s/g,'_')}_Term${term}_${session}.xlsx`;
@@ -12581,13 +12746,13 @@ function tmMarksStatus(cls, term, subjectKey, subjectHasOral){
 }
 function renderMarksCollectionStatus(){
   const term = document.getElementById('tmTerm')?.value||'1';
-  const teachers = (ls('teachers')||[]).filter(t=>t.teachAssignments&&t.teachAssignments.length);
+  const teachers = (ls('teachers')||[]).filter(t=>getEffectiveTeacherAssignments(t).length);
   const dl = daysRemainingInfo();
 
   // Task Dashboard header stats
   let totalSubjects=0, completed=0, partial=0, pending=0;
   teachers.forEach(t=>{
-    t.teachAssignments.forEach(a=>{
+    getEffectiveTeacherAssignments(t).forEach(a=>{
       const subs = getSubjects(a.class, term);
       const sub = subs.find(sb=>sb.label===a.subject);
       if(!sub) return;
@@ -12627,7 +12792,8 @@ function renderMarksCollectionStatus(){
     </div>` : `<div style="padding:10px;background:#f0fdf4;border-radius:8px;margin-bottom:14px;font-size:12.5px;color:#166534">✅ All marks submitted — nothing pending.</div>`;
 
   const perTeacher = teachers.map(t=>{
-    const rows = t.teachAssignments.map(a=>{
+    const tAssignments = getEffectiveTeacherAssignments(t);
+    const rows = tAssignments.map(a=>{
       const subs = getSubjects(a.class, term);
       const sub = subs.find(sb=>sb.label===a.subject);
       if(!sub) return '';
@@ -12639,13 +12805,13 @@ function renderMarksCollectionStatus(){
         ${st.level!=='green'?`<button class="btn btn-xs btn-outline" onclick="tmSendReminder('${t.id}','${esc(a.class)}','${esc(a.subject)}')"><i class="fab fa-whatsapp"></i> Remind</button>`:''}
       </div>`;
     }).join('');
-    const completedCount = t.teachAssignments.filter(a=>{
+    const completedCount = tAssignments.filter(a=>{
       const subs=getSubjects(a.class,term); const sub=subs.find(sb=>sb.label===a.subject);
       return sub && tmMarksStatus(a.class,term,sub.key,sub.hasOral).level==='green';
     }).length;
     return `<div style="padding:10px;border:1px solid var(--border);border-radius:10px;margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <div style="font-weight:800;font-size:13px">${esc(t.name)} — ${t.teachAssignments.length} assigned, ${completedCount} completed</div>
+        <div style="font-weight:800;font-size:13px">${esc(t.name)} — ${tAssignments.length} assigned, ${completedCount} completed</div>
         <button class="btn btn-xs btn-outline" onclick="openTeacherMarksTasks('${t.id}')"><i class="fas fa-book"></i> View Tasks</button>
       </div>
       ${rows}
@@ -12665,7 +12831,7 @@ function openTeacherMarksTasks(teacherId){
   if(!teacher){ toast('Teacher not found','error'); return; }
   const term = document.getElementById('tmTerm')?.value||'1';
   const termLabel = term==='1'?'T1':term==='2'?'T2':'T3';
-  const assignments = teacher.teachAssignments||[];
+  const assignments = getEffectiveTeacherAssignments(teacher);
   const dl = daysRemainingInfo();
   const rows = assignments.map(a=>{
     const subs = getSubjects(a.class, term);
@@ -13170,6 +13336,10 @@ function renderRoutine(){
       style="padding:10px 20px;border:none;background:none;color:#64748b;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;border-radius:6px 6px 0 0">
       🏫 Whole School (Edit)
     </button>`:''}
+    <button id="rtabTeacher" onclick="switchRoutineView('teacher')"
+      style="padding:10px 20px;border:none;background:none;color:#64748b;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;border-radius:6px 6px 0 0">
+      👤 Teacher Routine
+    </button>
   </div>
 
   <!-- WEEKLY VIEW -->
@@ -13229,18 +13399,28 @@ function renderRoutine(){
       <div style="font-size:12px;color:#64748b"><i class="fas fa-info-circle"></i> Every class, every day, every period — one table. Scroll sideways for Monday through Saturday. Edit any cell directly. A teacher already on another class in the same period gets blocked automatically.</div>
     </div>
     <div id="wsrBody"></div>
+  </div>
+
+  <!-- TEACHER ROUTINE (PRINTABLE) VIEW -->
+  <div id="routineTeacherView" style="display:none">
+    <div class="card no-print" style="border-top-left-radius:0;padding:14px 16px">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap" id="trControls"></div>
+    </div>
+    <div id="trBody"></div>
   </div>`;
 }
 
 function switchRoutineView(view){
-  const weekly = document.getElementById('routineWeeklyView');
-  const daily  = document.getElementById('routineDailyView');
-  const school = document.getElementById('routineSchoolView');
-  const wBtn   = document.getElementById('rtabWeekly');
-  const dBtn   = document.getElementById('rtabDaily');
-  const sBtn   = document.getElementById('rtabSchool');
-  [weekly,daily,school].forEach(el=>{ if(el) el.style.display='none'; });
-  [wBtn,dBtn,sBtn].forEach(btn=>{ if(btn){ btn.style.background='none'; btn.style.color='#64748b'; } });
+  const weekly  = document.getElementById('routineWeeklyView');
+  const daily   = document.getElementById('routineDailyView');
+  const school  = document.getElementById('routineSchoolView');
+  const teacher = document.getElementById('routineTeacherView');
+  const wBtn = document.getElementById('rtabWeekly');
+  const dBtn = document.getElementById('rtabDaily');
+  const sBtn = document.getElementById('rtabSchool');
+  const tBtn = document.getElementById('rtabTeacher');
+  [weekly,daily,school,teacher].forEach(el=>{ if(el) el.style.display='none'; });
+  [wBtn,dBtn,sBtn,tBtn].forEach(btn=>{ if(btn){ btn.style.background='none'; btn.style.color='#64748b'; } });
   if(view==='weekly'){
     if(weekly) weekly.style.display='';
     if(wBtn){ wBtn.style.background='#1a3a6b'; wBtn.style.color='white'; }
@@ -13249,6 +13429,10 @@ function switchRoutineView(view){
     if(school) school.style.display='';
     if(sBtn){ sBtn.style.background='#1a3a6b'; sBtn.style.color='white'; }
     loadWholeSchoolRoutine();
+  } else if(view==='teacher'){
+    if(teacher) teacher.style.display='';
+    if(tBtn){ tBtn.style.background='#1a3a6b'; tBtn.style.color='white'; }
+    loadTeacherRoutineView();
   } else {
     if(daily) daily.style.display='';
     if(dBtn){ dBtn.style.background='#1a3a6b'; dBtn.style.color='white'; }
@@ -13537,6 +13721,174 @@ function wsrSaveCell(el){
   }
   ss('routine', routine);
   toast(`✅ Saved — ${cls}, ${day}, Period ${el.dataset.period}`);
+}
+
+// ───────────────────────────────────────────────
+//  TEACHER ROUTINE — derived view (Period × Day) for a single teacher,
+//  scanned from every class's routine. Printable on A4 for handing out.
+// ───────────────────────────────────────────────
+const ROUTINE_DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+function getTeacherRoutineGrid(teacherName){
+  const routine = ls('routine')||{};
+  const classes = getAllClasses();
+  const grid = {};
+  ROUTINE_DAYS.forEach(day=>{
+    grid[day]=[];
+    for(let pi=0;pi<5;pi++){
+      let found=null;
+      for(const cls of classes){
+        const cell=((routine[cls]||{})[day]||{})[pi];
+        if(cell && cell.teacher===teacherName){ found={cls,subject:cell.subject||''}; break; }
+      }
+      grid[day][pi]=found;
+    }
+  });
+  return grid;
+}
+
+function loggedInTeacherRecord(){
+  const teachers=ls('teachers')||[];
+  return teachers.find(x=>x.id===currentUser.id||x.id===currentUser.teacherId)||null;
+}
+
+function loadTeacherRoutineView(){
+  const controls = document.getElementById('trControls');
+  const body = document.getElementById('trBody');
+  if(!controls||!body) return;
+  const teachers = ls('teachers')||[];
+  const isTeacherRole = currentUser.role==='teacher';
+  const own = isTeacherRole ? loggedInTeacherRecord() : null;
+
+  if(isTeacherRole){
+    if(!own){ body.innerHTML=emptyState('👤','No teacher record found','Ask the Principal to link your login to a teacher record'); controls.innerHTML=''; return; }
+    controls.innerHTML = `
+      <div style="font-weight:800;color:var(--primary);font-size:14px">${esc(own.name)}'s Routine</div>
+      <button class="btn btn-primary btn-sm" onclick="printTeacherRoutine('${own.id}')"><i class="fas fa-print"></i> Print My Routine</button>
+    `;
+    body.innerHTML = renderTeacherGridHTML(own.name);
+    return;
+  }
+
+  if(!teachers.length){ body.innerHTML=emptyState('👤','No teachers added yet','Add teachers from the Teachers page'); controls.innerHTML=''; return; }
+  const selectedId = document.getElementById('trTeacherSel')?.value || teachers[0].id;
+  controls.innerHTML = `
+    <div class="form-group" style="margin:0"><label>Teacher</label>
+      <select id="trTeacherSel" onchange="loadTeacherRoutineView()"
+        style="padding:9px 12px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+        ${teachers.map(t=>`<option value="${t.id}" ${t.id===selectedId?'selected':''}>${esc(t.name)}</option>`).join('')}
+      </select>
+    </div>
+    <button class="btn btn-primary btn-sm" style="margin-top:16px" onclick="printTeacherRoutine('${selectedId}')"><i class="fas fa-print"></i> Print This Teacher</button>
+    <button class="btn btn-gold btn-sm" style="margin-top:16px" onclick="printAllTeacherRoutines()"><i class="fas fa-print"></i> Print All Teachers (A4, one per page)</button>
+  `;
+  const t = teachers.find(x=>x.id===selectedId);
+  body.innerHTML = t ? renderTeacherGridHTML(t.name) : '';
+}
+
+function renderTeacherGridHTML(teacherName){
+  const grid = getTeacherRoutineGrid(teacherName);
+  const pt = getPeriodTimings();
+  let anyAssigned=false;
+  ROUTINE_DAYS.forEach(d=>grid[d].forEach(c=>{ if(c) anyAssigned=true; }));
+  return `
+  <div class="table-wrap">
+  <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead>
+      <tr style="background:#1a3a6b">
+        <th style="padding:8px 10px;color:white;text-align:left;min-width:80px">Period</th>
+        ${ROUTINE_DAYS.map(d=>`<th style="padding:8px 6px;color:white;text-align:center;min-width:110px">${d}</th>`).join('')}
+      </tr>
+    </thead>
+    <tbody>
+      ${[0,1,2,3,4].map(pi=>{
+        const timing=pt[pi];
+        const timeTxt=timing&&timing.start?fmtTime(timing.start)+' – '+fmtTime(timing.end):'';
+        return `<tr style="border-bottom:1px solid #e8eef5;${pi%2===0?'background:#fafbff':''}">
+          <td style="padding:8px 10px;font-weight:800;color:#1a3a6b;white-space:nowrap">
+            Period ${pi+1}${timeTxt?`<div style="font-size:10px;color:#64748b;font-weight:400">${timeTxt}</div>`:''}
+          </td>
+          ${ROUTINE_DAYS.map(day=>{
+            const cell=grid[day][pi];
+            return cell
+              ? `<td style="padding:7px 6px;text-align:center"><div style="font-weight:800;color:#1a3a6b">${esc(cell.cls)}</div><div style="font-size:10.5px;color:#64748b">${esc(cell.subject||'')}</div></td>`
+              : `<td style="padding:7px 6px;text-align:center;color:#a0aec0;font-size:11px">Free</td>`;
+          }).join('')}
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>
+  </div>
+  ${!anyAssigned?'<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:12px">This teacher is not assigned to any period yet — set it up in Whole School (Edit) or the class Edit Routine.</div>':''}
+  `;
+}
+
+function printTeacherRoutine(teacherId){
+  const teachers=ls('teachers')||[];
+  const t=teachers.find(x=>x.id===teacherId);
+  if(!t){ toast('Teacher not found','error'); return; }
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>Routine - ${esc(t.name)}</title>${teacherRoutinePrintStyles()}</head><body>
+    ${teacherRoutinePrintBlockHTML(t.name)}
+  </body></html>`);
+  w.document.close(); w.focus(); setTimeout(()=>{w.print();w.close();},400);
+}
+
+function printAllTeacherRoutines(){
+  const teachers=ls('teachers')||[];
+  if(!teachers.length){ toast('No teachers to print','error'); return; }
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>Teacher Routines — All</title>${teacherRoutinePrintStyles()}</head><body>
+    ${teachers.map((t,i)=>`<div style="${i<teachers.length-1?'page-break-after:always':''}">${teacherRoutinePrintBlockHTML(t.name)}</div>`).join('')}
+  </body></html>`);
+  w.document.close(); w.focus(); setTimeout(()=>{w.print();w.close();},500);
+}
+
+function teacherRoutinePrintStyles(){
+  return `<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+  <style>
+    body{font-family:'Nunito',sans-serif;padding:20px;color:#1a2740}
+    .header{text-align:center;border-bottom:3px solid #1a3a6b;padding-bottom:14px;margin-bottom:18px}
+    h1{font-family:'Playfair Display',serif;color:#1a3a6b;font-size:20px;margin:0}
+    h2{font-size:14px;color:#c9a84c;margin-top:6px}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    th{background:#1a3a6b;color:white;padding:9px;text-align:center}
+    td{padding:9px 6px;border:1px solid #d0dbe8;text-align:center;vertical-align:middle}
+    .footer{margin-top:26px;display:flex;justify-content:space-between;font-size:12px;border-top:1px solid #d0dbe8;padding-top:14px}
+    @page{size:A4 portrait;margin:16mm}
+  </style>`;
+}
+function teacherRoutinePrintBlockHTML(teacherName){
+  const grid=getTeacherRoutineGrid(teacherName);
+  const pt=getPeriodTimings();
+  return `
+  <div class="header">
+    <h1>Children's Paradise School</h1>
+    <div style="font-size:11px;color:#6b7a99">Uttar Radhanagar, Magrahat, South 24 Parganas, West Bengal</div>
+    <h2>TEACHER ROUTINE — ${esc(teacherName)}</h2>
+  </div>
+  <table>
+    <thead><tr><th style="text-align:left">Period</th>${ROUTINE_DAYS.map(d=>`<th>${d}</th>`).join('')}</tr></thead>
+    <tbody>
+      ${[0,1,2,3,4].map(pi=>{
+        const timing=pt[pi];
+        const timeTxt=timing&&timing.start?fmtTime(timing.start)+' – '+fmtTime(timing.end):'';
+        return `<tr>
+          <td style="text-align:left;font-weight:800">Period ${pi+1}${timeTxt?`<div style="font-size:9px;color:#6b7a99;font-weight:400">${timeTxt}</div>`:''}</td>
+          ${ROUTINE_DAYS.map(day=>{
+            const cell=grid[day][pi];
+            return cell
+              ? `<td><div style="font-weight:800">${esc(cell.cls)}</div><div style="font-size:10px;color:#6b7a99">${esc(cell.subject||'')}</div></td>`
+              : `<td style="color:#a0aec0">Free</td>`;
+          }).join('')}
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>
+  <div class="footer">
+    <div>Teacher Signature: _______________</div>
+    <div>Principal Signature: _______________</div>
+  </div>`;
 }
 
 function markTeacherAbsent(){
@@ -13997,6 +14349,17 @@ function openStudentProfile(id){
 
   <!-- BASIC TAB -->
   <div id="pfBasic">
+    ${(()=>{ const pc=calcProfileCompletion(s); const barColor=pc.pct>=80?'#15803d':pc.pct>=40?'#c9a84c':'#b91c1c'; const bg=pc.pct>=80?'#dcfce7':pc.pct>=40?'#fffbeb':'#fef2f2';
+      return `<div style="background:${bg};border:1px solid ${barColor}33;border-radius:10px;padding:10px 14px;margin-top:6px;margin-bottom:4px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-size:12px;font-weight:800;color:${barColor}">Profile ${pc.pct}% Complete</span>
+          <span style="font-size:11px;color:var(--text-muted)">${pc.filled} of ${pc.total} details filled</span>
+        </div>
+        <div style="height:7px;background:white;border-radius:4px;overflow:hidden">
+          <div style="height:100%;width:${pc.pct}%;background:${barColor};border-radius:4px"></div>
+        </div>
+        ${pc.missing.length&&pc.pct<100?`<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">Missing: ${pc.missing.slice(0,6).map(esc).join(', ')}${pc.missing.length>6?` +${pc.missing.length-6} more`:''}</div>`:''}
+      </div>`; })()}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
       ${[['Student Name',s.name],['Class',s.class],['Section',s.section||'—'],['Roll No.',s.roll],['Academic Year',s.session],['Student ID',s.studentId],
         ...STUDENT_FIELD_SCHEMA.map(f=>[f.label, f.type==='dob'?fmtDate(s[f.key]):(s[f.key]||'—')]),
@@ -15353,6 +15716,198 @@ function getClassWiseAttentionSummary(session){
 }
 
 // ── Page: Students Need Attention ──
+// ═══════════════════════════════════════════════════════
+//  PANCHAYAT ADMISSION MAP
+//  Real Magrahat II CD block center + its 14 actual Gram Panchayats.
+//  Individual GP boundary/coordinate data isn't available, so markers
+//  are arranged in a labeled ring around the real block center —
+//  approximate positioning, clearly noted on the page. The admission
+//  COUNTS themselves are exact, computed directly from student records.
+// ═══════════════════════════════════════════════════════
+const MAGRAHAT_II_CENTER = {lat:22.2420, lng:88.3784};
+const MAGRAHAT_II_PANCHAYATS = ['Amratala','Dhamua Dakshin','Dhamua Uttar','Dhanpota','Dihikalas','Gokarni','Hotor Morjada','Jugdia','Magrahat Paschim','Magrahat Purba','Mohanpur','Multi','Nainan','Urelchandpur'];
+function getPanchayatMapPoints(){
+  const n = MAGRAHAT_II_PANCHAYATS.length;
+  const radius = 0.05; // ~5.5km visual ring — approximate spread only, not real GP boundaries
+  return MAGRAHAT_II_PANCHAYATS.map((name,i)=>{
+    const angle = (i/n) * 2*Math.PI - Math.PI/2;
+    const lat = MAGRAHAT_II_CENTER.lat + radius*Math.sin(angle);
+    const lng = MAGRAHAT_II_CENTER.lng + (radius*Math.cos(angle))/Math.cos(MAGRAHAT_II_CENTER.lat*Math.PI/180);
+    return {name, lat, lng};
+  });
+}
+function matchKnownPanchayat(rawLower){
+  return MAGRAHAT_II_PANCHAYATS.find(p=>{
+    const pl=p.toLowerCase();
+    return pl===rawLower || rawLower.includes(pl) || pl.includes(rawLower);
+  });
+}
+// Aggregates every active-session student by their Panchayat field (from the Address section of Add/Edit Student).
+function getPanchayatAdmissionCounts(){
+  const session = getActiveSession();
+  const students = (ls('students')||[]).filter(s=>s.session===session);
+  const counts = {}; // key: lowercase trimmed -> {label, count}
+  let blank = 0;
+  students.forEach(s=>{
+    const raw = (s.panchayat||'').trim();
+    if(!raw){ blank++; return; }
+    const key = raw.toLowerCase();
+    if(!counts[key]) counts[key] = {label: raw, count: 0};
+    counts[key].count++;
+  });
+  return {counts, total: students.length, blank};
+}
+
+function renderPanchayatMap(){
+  const {counts, total, blank} = getPanchayatAdmissionCounts();
+  const entries = Object.values(counts).sort((a,b)=>a.count-b.count); // lowest first — the ones to focus ads on
+  const avg = entries.length ? (total-blank)/entries.length : 0;
+  const maxCount = entries.length ? Math.max(...entries.map(e=>e.count)) : 0;
+  const distinctAreas = entries.length;
+
+  return `
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px">
+    <div>
+      <div style="font-size:20px;font-weight:900;color:#0d1f3c">🗺️ Panchayat Admission Map</div>
+      <div style="font-size:12px;color:#6b7a99;margin-top:2px">Which areas around Magrahat II your students come from — spot low-admission panchayats to target for ads</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px">
+    <div style="background:white;border:2px solid #e8eef5;border-radius:12px;padding:12px 14px">
+      <div style="font-size:11px;font-weight:800;color:#1a3a6b">👨‍🎓 TOTAL STUDENTS</div>
+      <div style="font-size:22px;font-weight:900;color:#0d1f3c;margin-top:2px">${total}</div>
+    </div>
+    <div style="background:white;border:2px solid #e8eef5;border-radius:12px;padding:12px 14px">
+      <div style="font-size:11px;font-weight:800;color:#1a3a6b">📍 AREAS COVERED</div>
+      <div style="font-size:22px;font-weight:900;color:#0d1f3c;margin-top:2px">${distinctAreas}</div>
+    </div>
+    <div style="background:white;border:2px solid #e8eef5;border-radius:12px;padding:12px 14px">
+      <div style="font-size:11px;font-weight:800;color:#1a3a6b">⚖️ AVG PER AREA</div>
+      <div style="font-size:22px;font-weight:900;color:#0d1f3c;margin-top:2px">${avg.toFixed(1)}</div>
+    </div>
+    ${blank>0?`<div style="background:#fef2f2;border:2px solid #fecaca;border-radius:12px;padding:12px 14px">
+      <div style="font-size:11px;font-weight:800;color:#b91c1c">⚠️ MISSING PANCHAYAT</div>
+      <div style="font-size:22px;font-weight:900;color:#b91c1c;margin-top:2px">${blank}</div>
+      <div style="font-size:10px;color:#b91c1c;margin-top:1px">Fill this in from Edit Student for a fuller picture</div>
+    </div>`:''}
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden;margin-bottom:16px">
+    <div id="panchayatMapEl" style="height:440px;width:100%"></div>
+    <div style="padding:10px 16px;background:#f8faff;font-size:11px;color:#6b7a99;border-top:1px solid #e8eef5">
+      <i class="fas fa-circle-info"></i> Marker size/color = admission count from that Gram Panchayat (🔴 low → 🟢 high). Positions are arranged around Magrahat II's real center for a clear visual — official GP boundary maps should be used for precise geography. Panchayat names not on Magrahat II's list of 14 are grouped under "Other Areas" in the table below.
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title"><i class="fas fa-chart-bar"></i> All Areas — Lowest Admission First</div>
+    <canvas id="panchayatChart" height="${Math.max(120,entries.length*26)}"></canvas>
+  </div>
+
+  <div class="card">
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span><i class="fas fa-table"></i> Panchayat / Area Breakdown</span>
+      <button class="btn btn-xs btn-outline" onclick="exportPanchayatCSV()"><i class="fas fa-file-csv"></i> Export CSV</button>
+    </div>
+    <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px">
+      <thead><tr style="background:#1a3a6b;color:white;text-align:left">
+        <th style="padding:8px 10px">Area / Panchayat</th><th style="padding:8px 10px">In Magrahat II?</th><th style="padding:8px 10px">Students</th><th style="padding:8px 10px">vs. Average</th>
+      </tr></thead>
+      <tbody>
+        ${entries.map(e=>{
+          const known = matchKnownPanchayat(e.label.toLowerCase());
+          const low = e.count < avg;
+          return `<tr style="border-top:1px solid #f0f4ff;${low?'background:#fef2f2':''}">
+            <td style="padding:8px 10px;font-weight:700;color:#1a3a6b">${esc(e.label)}</td>
+            <td style="padding:8px 10px;color:#6b7a99">${known?'✅ '+esc(known):'— Other Area'}</td>
+            <td style="padding:8px 10px;font-weight:900;font-size:14px;color:${low?'#b91c1c':'#15803d'}">${e.count}</td>
+            <td style="padding:8px 10px">${low?'<span style="color:#b91c1c;font-weight:800">🎯 Below average — consider ads here</span>':'<span style="color:#15803d;font-weight:700">Above average</span>'}</td>
+          </tr>`;
+        }).join('')}
+        ${!entries.length?'<tr><td colspan="4" style="padding:20px;text-align:center;color:var(--text-muted)">No panchayat data yet — fill in the Panchayat field from Edit Student.</td></tr>':''}
+      </tbody>
+    </table>
+    </div>
+  </div>`;
+}
+
+// Initializes the Leaflet map + Chart.js bar chart once the page's HTML is actually in the DOM.
+function initPanchayatMap(){
+  const mapEl = document.getElementById('panchayatMapEl');
+  if(!mapEl || typeof L==='undefined') return;
+  if(mapEl._leaflet_id){ return; } // already initialized this render
+  const {counts} = getPanchayatAdmissionCounts();
+  const points = getPanchayatMapPoints();
+  const countFor = (name) => {
+    const nl = name.toLowerCase();
+    const hit = Object.values(counts).find(c=>{ const cl=c.label.toLowerCase(); return cl===nl || cl.includes(nl) || nl.includes(cl); });
+    return hit ? hit.count : 0;
+  };
+  const maxCount = Math.max(1, ...points.map(p=>countFor(p.name)));
+
+  const map = L.map('panchayatMapEl').setView([MAGRAHAT_II_CENTER.lat, MAGRAHAT_II_CENTER.lng], 12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors', maxZoom: 18
+  }).addTo(map);
+
+  L.marker([MAGRAHAT_II_CENTER.lat, MAGRAHAT_II_CENTER.lng], {
+    icon: L.divIcon({className:'', html:'<div style="background:#1a3a6b;color:white;padding:4px 10px;border-radius:8px;font-weight:900;font-size:11px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.3)">🏫 Children&#39;s Paradise School</div>', iconSize:[0,0]})
+  }).addTo(map);
+
+  points.forEach(p=>{
+    const count = countFor(p.name);
+    const pct = count/maxCount;
+    const color = count===0 ? '#94a3b8' : pct<0.34 ? '#dc2626' : pct<0.67 ? '#f59e0b' : '#16a34a';
+    const radius = 8 + pct*18;
+    L.circleMarker([p.lat,p.lng], {radius, color, fillColor:color, fillOpacity:0.55, weight:2}).addTo(map)
+      .bindPopup(`<b>${p.name}</b><br>${count} student${count!==1?'s':''} admitted`);
+    L.marker([p.lat,p.lng], {
+      icon: L.divIcon({className:'', html:`<div style="font-size:10px;font-weight:800;color:#1a2740;white-space:nowrap;transform:translate(-50%,6px)">${p.name} (${count})</div>`, iconSize:[0,0]})
+    }).addTo(map);
+  });
+
+  // Chart.js horizontal bar — lowest admission first, matching the table below
+  const canvas = document.getElementById('panchayatChart');
+  if(canvas && typeof Chart!=='undefined'){
+    const entries = Object.values(counts).sort((a,b)=>a.count-b.count);
+    if(window._panchayatChartInstance) window._panchayatChartInstance.destroy();
+    window._panchayatChartInstance = new Chart(canvas, {
+      type:'bar',
+      data:{
+        labels: entries.map(e=>e.label),
+        datasets:[{
+          data: entries.map(e=>e.count),
+          backgroundColor: entries.map(e=>{
+            const known = matchKnownPanchayat(e.label.toLowerCase());
+            return known ? '#1a3a6b' : '#c9a84c';
+          })
+        }]
+      },
+      options:{
+        indexAxis:'y',
+        plugins:{legend:{display:false}},
+        scales:{x:{beginAtZero:true,ticks:{precision:0}}}
+      }
+    });
+  }
+}
+function exportPanchayatCSV(){
+  const {counts} = getPanchayatAdmissionCounts();
+  const entries = Object.values(counts).sort((a,b)=>a.count-b.count);
+  const rows=[['Area / Panchayat','In Magrahat II List','Students']];
+  entries.forEach(e=>{
+    const known = matchKnownPanchayat(e.label.toLowerCase());
+    rows.push([e.label, known?'Yes — '+known:'No', e.count]);
+  });
+  const csv=rows.map(r=>r.map(c=>{const v=String(c===null||c===undefined?'':c);return/[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\r\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='panchayat-admission-report.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+
 function renderNeedAttention(){
   const session=getActiveSession();
   const isTeacher=currentUser&&currentUser.role==='teacher';
@@ -17707,6 +18262,10 @@ function printPerformanceAnalysis(studentId){
 }
 
 function filterFeeStudents(){
+  clearTimeout(_feeFilterTimer);
+  _feeFilterTimer = setTimeout(_doFilterFeeStudents, 80);
+}
+function _doFilterFeeStudents(){
   const q = (document.getElementById('feeSearchInput')?.value||'').toLowerCase();
   const cls = document.getElementById('feeClassFilter')?.value||'';
   const status = document.getElementById('feeStatusFilter')?.value||'';
@@ -18366,7 +18925,6 @@ window.addEventListener('resize', updateMenuToggle);
 // ═══════════════════════════════════════════════════════
 
 (function extendInit(){
-  if(!ls('timetable'))    ss('timetable',{});
   if(!ls('exams'))        ss('exams',[]);
   if(!ls('lessonPlans'))  ss('lessonPlans',[]);
   if(!ls('logbookData'))  ss('logbookData',[]);
@@ -18405,172 +18963,6 @@ function cardHead(icon,title,btns){
     <div style="font-size:18px;font-weight:900;color:var(--primary)">${icon} ${title}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">${btns||''}</div>
   </div>`;
-}
-
-// ════════════════════════════
-//  TIMETABLE MANAGEMENT
-// ════════════════════════════
-function renderTimetable(){
-  const classes = getAllClasses();
-  const selCls  = ls('ttSelClass')||classes[0]||'';
-  const tt      = ls('timetable')||{};
-  const clsData = tt[selCls]||{};
-  const days    = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-  const periods = [1,2,3,4,5]; // 5 periods only
-  const pt      = getPeriodTimings();
-
-  const clsOpts = classes.map(c=>`<option value="${esc(c)}" ${c===selCls?'selected':''}>${esc(c)}</option>`).join('');
-
-  let grid = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:640px">
-  <thead><tr style="background:linear-gradient(135deg,#1a3a6b,#2456a4)">
-    <th style="padding:10px 12px;color:white;text-align:left;font-size:11px;min-width:100px">Period / Time</th>
-    ${days.map(d=>`<th style="padding:10px;color:white;font-size:11px;text-align:center;min-width:110px">${d}</th>`).join('')}
-  </tr></thead><tbody>`;
-
-  periods.forEach((p,pi)=>{
-    const ptIdx = pi; // period index 0-4
-    const timing = pt[ptIdx];
-    const timeTxt = timing&&timing.start ? fmtTime(timing.start)+' – '+fmtTime(timing.end) : '';
-
-    // Tiffin after period 3
-    if(p===4){
-      const tt2=pt['t'];
-      const tiffTxt = tt2&&tt2.start ? fmtTime(tt2.start)+(tt2.end?' – '+fmtTime(tt2.end):'') : '';
-      grid+=`<tr><td colspan="${days.length+1}" style="text-align:center;background:#fef9c3;color:#a16207;font-weight:800;padding:8px;font-size:12px;border-bottom:1px solid #e8eef5">☕ TIFFIN BREAK${tiffTxt?' ('+tiffTxt+')':''}</td></tr>`;
-    }
-
-    grid+=`<tr style="border-bottom:1px solid var(--border)">
-      <td style="padding:8px 14px;font-weight:800;color:var(--primary);font-size:12px;background:#f8faff;white-space:nowrap">
-        Period ${p}
-        ${timeTxt?`<div style="font-size:9px;color:#64748b;font-weight:400">${timeTxt}</div>`:''}
-      </td>`;
-    days.forEach(d=>{
-      const cell = ((clsData[d]||{})[p])||{};
-      grid+=`<td style="padding:5px;text-align:center">
-        <div onclick="editTTCell('${selCls}','${d}',${p})"
-          style="cursor:pointer;padding:8px 6px;border-radius:8px;border:1.5px dashed ${cell.subject?'var(--primary-light)':'var(--border)'};
-          background:${cell.subject?'#eff6ff':'transparent'};min-height:50px;display:flex;flex-direction:column;
-          align-items:center;justify-content:center;font-size:11px;transition:.2s" title="Click to edit">
-          ${cell.subject
-            ?`<div style="font-weight:800;color:var(--primary);line-height:1.3">${esc(cell.subject)}</div>
-              <div style="font-size:9px;color:#4b5563;margin-top:2px;font-weight:600">${esc(cell.teacher||'')}</div>`
-            :'<div style="color:#cbd5e1;font-size:10px">+ Add</div>'}
-        </div>
-      </td>`;
-    });
-    grid+='</tr>';
-  });
-  grid+='</tbody></table></div>';
-
-  return `<div class="card">
-    ${cardHead('📅','Timetable',`
-      <select onchange="ss('ttSelClass',this.value);showPage('timetable')" style="padding:8px 12px;border:2px solid var(--border);border-radius:8px;font-size:13px">${clsOpts}</select>
-      <button class="btn btn-outline btn-sm" onclick="openPeriodTimings()"><i class="fas fa-clock"></i> Timings</button>
-      <button class="btn btn-outline btn-sm" onclick="copyTimetable('${selCls}')"><i class="fas fa-copy"></i> Copy</button>
-      <button class="btn btn-danger btn-sm" onclick="clearTimetable('${selCls}')"><i class="fas fa-trash"></i> Clear</button>
-      <button class="btn btn-primary btn-sm" onclick="printTimetable('${selCls}')"><i class="fas fa-print"></i> Print</button>`)}
-    <div style="background:#eff6ff;border-radius:10px;padding:9px 14px;margin-bottom:12px;font-size:12px;color:var(--primary)">
-      <i class="fas fa-info-circle"></i> Click any cell to assign subject &amp; teacher &nbsp;·&nbsp; Class: <strong>${selCls}</strong> &nbsp;·&nbsp; 5 Periods + Tiffin
-    </div>
-    ${grid}
-  </div>`;
-}
-
-function editTTCell(cls,day,period){
-  const tt   = ls('timetable')||{};
-  const cell = ((tt[cls]||{})[day]||{})[period]||{};
-  const clsSubs = getClassSubjects(cls);
-  const subNames = clsSubs.map(s=>typeof s==='string'?s:s.name).filter(Boolean);
-  if(!subNames.length) subNames.push(...SUBJECTS_DEFAULT);
-  const teachers = ls('teachers')||[];
-  openModal(`Period ${period} — ${day} — ${cls}`,`
-  <div class="form-group"><label>Subject</label>
-    <select id="ttSub" style="width:100%;padding:11px;border:2px solid var(--border);border-radius:8px;font-family:inherit">
-      <option value="">— Free Period —</option>
-      ${subNames.map(s=>`<option value="${esc(s)}" ${s===cell.subject?'selected':''}>${esc(s)}</option>`).join('')}
-    </select>
-  </div>
-  <div class="form-group"><label>Teacher</label>
-    <select id="ttTch" style="width:100%;padding:11px;border:2px solid var(--border);border-radius:8px;font-family:inherit">
-      <option value="">— None —</option>
-      ${teachers.map(t=>`<option value="${esc(t.name)}" ${t.name===cell.teacher?'selected':''}>${esc(t.name)}</option>`).join('')}
-    </select>
-  </div>
-  `,[
-    {label:'<i class="fas fa-save"></i> Save',cls:'btn-primary',onclick:`saveTTCell('${cls}','${day}',${period})`},
-    {label:'<i class="fas fa-times"></i> Clear',cls:'btn-outline',onclick:`clearTTCell('${cls}','${day}',${period})`},
-    {label:'Cancel',cls:'btn-light',onclick:'closeModal()'}
-  ]);
-}
-
-function saveTTCell(cls,day,period){
-  const tt=ls('timetable')||{};
-  if(!tt[cls])tt[cls]={};
-  if(!tt[cls][day])tt[cls][day]={};
-  tt[cls][day][period]={subject:document.getElementById('ttSub').value,teacher:document.getElementById('ttTch').value};
-  ss('timetable',tt);
-  toast('✅ Saved!');
-  closeModal();
-  showPage('timetable');
-}
-function clearTTCell(cls,day,period){
-  const tt=ls('timetable')||{};
-  if(tt[cls]&&tt[cls][day]) delete tt[cls][day][period];
-  ss('timetable',tt);
-  toast('Cleared','warning');
-  closeModal();
-  showPage('timetable');
-}
-function clearTimetable(cls){
-  if(!confirm(`Clear entire timetable for ${cls}?`))return;
-  const tt=ls('timetable')||{};
-  delete tt[cls];
-  ss('timetable',tt);
-  toast('Cleared','warning');
-  showPage('timetable');
-}
-function copyTimetable(fromCls){
-  const classes=getAllClasses().filter(c=>c!==fromCls);
-  openModal(`Copy Timetable from ${fromCls}`,`
-  <div class="form-group"><label>Copy to Class</label>
-    <select id="ttCopyTo" style="width:100%;padding:11px;border:2px solid var(--border);border-radius:8px;font-family:inherit">
-      ${classes.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
-    </select>
-  </div>
-  <div style="background:#fff7ed;padding:10px;border-radius:8px;font-size:12px;color:#92400e;margin-top:8px">
-    <i class="fas fa-exclamation-triangle"></i> This will overwrite the target class timetable.
-  </div>`,
-  [{label:'<i class="fas fa-copy"></i> Copy',cls:'btn-primary',onclick:`(function(){
-    const tt=ls('timetable')||{};
-    tt[document.getElementById('ttCopyTo').value]=JSON.parse(JSON.stringify(tt['${fromCls}']||{}));
-    ss('timetable',tt);
-    toast('✅ Timetable copied!');
-    closeModal();
-    showPage('timetable');
-  })()`},{label:'Cancel',cls:'btn-light',onclick:'closeModal()'}]);
-}
-function printTimetable(cls){
-  const tt=(ls('timetable')||{})[cls]||{};
-  const days=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-  const pt=getPeriodTimings();
-  const periods=[1,2,3,4,5];
-  const rows=periods.map((p,pi)=>{
-    const timing=pt[pi];
-    const timeTxt=timing&&timing.start?fmtTime(timing.start)+(timing.end?' – '+fmtTime(timing.end):''):'';
-    let tiffin='';
-    if(p===4){const tt2=pt['t'];tiffin=`<tr><td colspan="7" style="text-align:center;background:#fef9c3;color:#a16207;font-weight:700;padding:6px">☕ Tiffin Break${tt2&&tt2.start?' ('+fmtTime(tt2.start)+(tt2.end?' – '+fmtTime(tt2.end):'')+')':''}</td></tr>`;}
-    return tiffin+`<tr><td style="background:#f0f4ff"><b>Period ${p}</b>${timeTxt?'<br><small style="color:#64748b">'+timeTxt+'</small>':''}</td>${days.map(d=>{const c=((tt[d]||{})[p])||{};return`<td>${c.subject?`<b>${esc(c.subject)}</b><br><small style="color:#4b5563">${esc(c.teacher||'')}</small>`:''}</td>`;}).join('')}</tr>`;
-  }).join('');
-  const win=window.open('','_blank');
-  win.document.open();
-  win.document.write('<!DOCTYPE html><html><head><title>Timetable — '+cls+'</title>');
-  win.document.write('<style>*{box-sizing:border-box}body{font-family:Arial,sans-serif;padding:16px}h2{color:#1a3a6b;margin-bottom:12px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ccc;padding:7px 9px;text-align:center;font-size:11px}th{background:#1a3a6b;color:white}td:first-child{text-align:left}@media print{button{display:none}@page{margin:8mm}}</style>');
-  win.document.write('</head><body>');
-  win.document.write('<h2>Children&#39;s Paradise School &mdash; Timetable: '+cls+'</h2>');
-  win.document.write('<button onclick="window.print()" style="margin-bottom:12px;padding:8px 18px;background:#1a3a6b;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px">&#128424; Print</button>');
-  win.document.write('<table><thead><tr><th style="min-width:90px">Period</th>'+days.map(d=>'<th>'+d+'</th>').join('')+'</tr></thead><tbody>'+rows+'</tbody></table>');
-  win.document.write('</body></html>');
-  win.document.close();
 }
 
 // ════════════════════════════
@@ -19547,10 +19939,14 @@ function afterRender(pageId){
     if(pageId==='feeCollection'){
       setTimeout(()=>{ if(typeof filterFeeStudents==='function') filterFeeStudents(); }, 60);
     }
-    // Auto-load routine for first class
+    // Auto-load routine — teachers land on their own Teacher Routine tab, everyone else on Weekly
     if(pageId==='routine'){
       setTimeout(()=>{
-        if(typeof loadRoutine==='function') loadRoutine();
+        if(currentUser.role==='teacher' && typeof switchRoutineView==='function'){
+          switchRoutineView('teacher');
+        } else if(typeof loadRoutine==='function'){
+          loadRoutine();
+        }
       }, 80);
     }
     // Auto-load attendance for today
@@ -19598,12 +19994,9 @@ function afterRender(pageId){
     if(pageId==='syllabus'){
       setTimeout(()=>{ if(typeof loadSyllabus==='function') loadSyllabus(); }, 80);
     }
-    // Timetable: re-render to load class
-    if(pageId==='timetable'){
-      setTimeout(()=>{
-        const ttSel=document.querySelector('[onchange*="ttSelClass"]');
-        if(ttSel) ttSel.dispatchEvent(new Event('change'));
-      }, 80);
+    // Panchayat Admission Map: init Leaflet map + chart once the container is in the DOM
+    if(pageId==='panchayatMap'){
+      setTimeout(()=>{ if(typeof initPanchayatMap==='function') initPanchayatMap(); }, 100);
     }
   } catch(e){ console.error('afterRender error:', e); }
 }
@@ -19774,7 +20167,7 @@ if(typeof SUBJECTS_DEFAULT==='undefined'){
 // Safe init of all new module data stores
 (function safeModuleInit(){
   const defaults={
-    timetable:{}, exams:[], lessonPlans:[], logbookData:[], ptmBookings:[],
+    exams:[], lessonPlans:[], logbookData:[], ptmBookings:[],
     conductRecs:[], coExtra:[], subTeachers:[], helpdeskTix:[],
     anonComplaints:[], schoolDocs:[], assetReg:[], academicHistory:{}
   };
