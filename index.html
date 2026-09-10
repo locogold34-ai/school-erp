@@ -1685,10 +1685,13 @@ function findGovClassForSchoolClass(cls){
 }
 // Turns the age-rule engine into a plain statement for a given school class + session year,
 // e.g. "Class 3: students born in 2017 are eligible" — used on Class-wise Government Report (screen + print).
+// Birth year is derived to match ageAsOfJan1() exactly: a student born any month but January is one year
+// "younger" as of 1 Jan than a naive (sessionYear - birthYear) subtraction would suggest, since their
+// birthday that year hasn't occurred yet relative to 1 Jan — hence the extra "-1".
 function getGovAgeRuleTextForClass(cls, sessionYear){
   const r = getGovAgeRules().find(rule=>(rule.schoolClasses||[]).includes(cls));
   if(!r) return null;
-  const birthYear = sessionYear - r.minAge;
+  const birthYear = sessionYear - r.minAge - 1;
   return {
     rule: r,
     birthYear,
@@ -3571,7 +3574,7 @@ function printClassGovReport(){
     .summary div{border:1px solid #d0dbe8;border-radius:8px;padding:8px;text-align:center}
     .agerule{background:#fef3c7;border:1.5px solid #fde68a;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#78350f;font-weight:700}
     .footer{margin-top:34px;display:flex;justify-content:space-between;font-size:11.5px;border-top:1px solid #d0dbe8;padding-top:16px}
-    @page{size:A4;margin:15mm}
+    @page{size:A4 landscape;margin:12mm}
   </style></head><body>
   <div class="header">
     <h1>Children's Paradise School</h1>
@@ -15718,23 +15721,35 @@ function getClassWiseAttentionSummary(session){
 // ── Page: Students Need Attention ──
 // ═══════════════════════════════════════════════════════
 //  PANCHAYAT ADMISSION MAP
-//  Real Magrahat II CD block center + its 14 actual Gram Panchayats.
-//  Individual GP boundary/coordinate data isn't available, so markers
-//  are arranged in a labeled ring around the real block center —
-//  approximate positioning, clearly noted on the page. The admission
-//  COUNTS themselves are exact, computed directly from student records.
+//  School location verified from Sau's Google Maps link (Uttar Radhanagar
+//  railway station locality — the exact address on the pin). Panchayat
+//  positions verified individually via Wikipedia/census sources where a
+//  named village or census town anchors that GP (9 of 14); the remaining
+//  5 (no public coordinate source found for their GP villages) are placed
+//  within the correct block area based on the CD block's real boundary
+//  description — marked unverified below and flagged on the map itself.
 // ═══════════════════════════════════════════════════════
-const MAGRAHAT_II_CENTER = {lat:22.2420, lng:88.3784};
-const MAGRAHAT_II_PANCHAYATS = ['Amratala','Dhamua Dakshin','Dhamua Uttar','Dhanpota','Dihikalas','Gokarni','Hotor Morjada','Jugdia','Magrahat Paschim','Magrahat Purba','Mohanpur','Multi','Nainan','Urelchandpur'];
+const SCHOOL_LOCATION = {lat:22.269141, lng:88.383779}; // Uttar Radhanagar, per Sau's Google Maps link
+const MAGRAHAT_II_CENTER = {lat:22.2420, lng:88.3784}; // CD block centroid — used only to center the initial map view
+const MAGRAHAT_II_PANCHAYAT_POINTS = {
+  'Amratala':          {lat:22.2280, lng:88.3550, verified:false},
+  'Dhamua Dakshin':    {lat:22.2820, lng:88.3930, verified:true},  // south end of Dhamua census town/GP
+  'Dhamua Uttar':      {lat:22.2930, lng:88.3990, verified:true},  // north end of Dhamua census town/GP
+  'Dhanpota':          {lat:22.2600, lng:88.4050, verified:false},
+  'Dihikalas':         {lat:22.2463, lng:88.3425, verified:true},  // Dihi Kalas census town/GP (Wikipedia)
+  'Gokarni':           {lat:22.2200, lng:88.3650, verified:false},
+  'Hotor Morjada':     {lat:22.3087, lng:88.3994, verified:true},  // Hotar railway station (Wikipedia)
+  'Jugdia':            {lat:22.2518, lng:88.4331, verified:true},  // Jugdia village/GP (Wikipedia)
+  'Magrahat Paschim':  {lat:22.2420, lng:88.3650, verified:true},  // west of Magrahat town (real centre)
+  'Magrahat Purba':    {lat:22.2420, lng:88.3900, verified:true},  // east of Magrahat town (real centre)
+  'Mohanpur':          {lat:22.2150, lng:88.3550, verified:false},
+  'Multi':             {lat:22.269141, lng:88.383779, verified:true}, // Barat Kamdebpur (school's own locality) is in Multi GP
+  'Nainan':            {lat:22.2765, lng:88.3502, verified:true},  // Nainan census town/GP (Wikipedia)
+  'Urelchandpur':      {lat:22.2350, lng:88.4150, verified:false}
+};
+const MAGRAHAT_II_PANCHAYATS = Object.keys(MAGRAHAT_II_PANCHAYAT_POINTS);
 function getPanchayatMapPoints(){
-  const n = MAGRAHAT_II_PANCHAYATS.length;
-  const radius = 0.05; // ~5.5km visual ring — approximate spread only, not real GP boundaries
-  return MAGRAHAT_II_PANCHAYATS.map((name,i)=>{
-    const angle = (i/n) * 2*Math.PI - Math.PI/2;
-    const lat = MAGRAHAT_II_CENTER.lat + radius*Math.sin(angle);
-    const lng = MAGRAHAT_II_CENTER.lng + (radius*Math.cos(angle))/Math.cos(MAGRAHAT_II_CENTER.lat*Math.PI/180);
-    return {name, lat, lng};
-  });
+  return MAGRAHAT_II_PANCHAYATS.map(name=>({name, ...MAGRAHAT_II_PANCHAYAT_POINTS[name]}));
 }
 function matchKnownPanchayat(rawLower){
   return MAGRAHAT_II_PANCHAYATS.find(p=>{
@@ -15796,7 +15811,7 @@ function renderPanchayatMap(){
   <div class="card" style="padding:0;overflow:hidden;margin-bottom:16px">
     <div id="panchayatMapEl" style="height:440px;width:100%"></div>
     <div style="padding:10px 16px;background:#f8faff;font-size:11px;color:#6b7a99;border-top:1px solid #e8eef5">
-      <i class="fas fa-circle-info"></i> Marker size/color = admission count from that Gram Panchayat (🔴 low → 🟢 high). Positions are arranged around Magrahat II's real center for a clear visual — official GP boundary maps should be used for precise geography. Panchayat names not on Magrahat II's list of 14 are grouped under "Other Areas" in the table below.
+      <i class="fas fa-circle-info"></i> Marker size/color = admission count (🔴 low → 🟢 high). Solid circles are real, verified locations (school pin + 9 of 14 panchayats, sourced from official village/census records); dashed circles marked <b>*</b> are approximate placements within the correct area, since no public coordinate exists for that panchayat's exact village. Panchayat names not on Magrahat II's list of 14 are grouped under "Other Areas" in the table below.
     </div>
   </div>
 
@@ -15847,12 +15862,12 @@ function initPanchayatMap(){
   };
   const maxCount = Math.max(1, ...points.map(p=>countFor(p.name)));
 
-  const map = L.map('panchayatMapEl').setView([MAGRAHAT_II_CENTER.lat, MAGRAHAT_II_CENTER.lng], 12);
+  const map = L.map('panchayatMapEl').setView([SCHOOL_LOCATION.lat, SCHOOL_LOCATION.lng], 12);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors', maxZoom: 18
   }).addTo(map);
 
-  L.marker([MAGRAHAT_II_CENTER.lat, MAGRAHAT_II_CENTER.lng], {
+  L.marker([SCHOOL_LOCATION.lat, SCHOOL_LOCATION.lng], {
     icon: L.divIcon({className:'', html:'<div style="background:#1a3a6b;color:white;padding:4px 10px;border-radius:8px;font-weight:900;font-size:11px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.3)">🏫 Children&#39;s Paradise School</div>', iconSize:[0,0]})
   }).addTo(map);
 
@@ -15861,10 +15876,10 @@ function initPanchayatMap(){
     const pct = count/maxCount;
     const color = count===0 ? '#94a3b8' : pct<0.34 ? '#dc2626' : pct<0.67 ? '#f59e0b' : '#16a34a';
     const radius = 8 + pct*18;
-    L.circleMarker([p.lat,p.lng], {radius, color, fillColor:color, fillOpacity:0.55, weight:2}).addTo(map)
-      .bindPopup(`<b>${p.name}</b><br>${count} student${count!==1?'s':''} admitted`);
+    L.circleMarker([p.lat,p.lng], {radius, color, fillColor:color, fillOpacity:0.55, weight:2, dashArray: p.verified?null:'4,4'}).addTo(map)
+      .bindPopup(`<b>${p.name}</b><br>${count} student${count!==1?'s':''} admitted<br><span style="font-size:11px;color:${p.verified?'#16a34a':'#b45309'}">${p.verified?'📍 Verified location':'📍 Approximate — exact GP coordinates not publicly available'}</span>`);
     L.marker([p.lat,p.lng], {
-      icon: L.divIcon({className:'', html:`<div style="font-size:10px;font-weight:800;color:#1a2740;white-space:nowrap;transform:translate(-50%,6px)">${p.name} (${count})</div>`, iconSize:[0,0]})
+      icon: L.divIcon({className:'', html:`<div style="font-size:10px;font-weight:800;color:#1a2740;white-space:nowrap;transform:translate(-50%,6px)">${p.name} (${count})${p.verified?'':' *'}</div>`, iconSize:[0,0]})
     }).addTo(map);
   });
 
