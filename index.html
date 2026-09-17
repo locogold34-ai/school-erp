@@ -3,7 +3,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CPS ERP">
+<meta name="theme-color" content="#1a3a6b">
 <title>Children's Paradise School - ERP v23</title>
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;600;700;800;900&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -1109,6 +1114,72 @@ td .btn-xs + .btn-xs { margin-left: 3px; }
 }
 
 /* ============================================================
+   CROSS-DEVICE TOUCH & VIEWPORT ENHANCEMENTS
+   (Desktop / Laptop / Tablet / Android / iPhone)
+   ============================================================ */
+
+/* iOS Safari auto-zooms the page when a focused input's font-size is
+   under 16px. Many inputs in this app use 12–14px inline styles, which
+   are overridden here (the !important beats inline styles) so typing
+   on an iPhone never triggers an unwanted zoom. */
+@media (max-width: 900px) {
+  input, select, textarea { font-size: 16px !important; }
+}
+
+/* Comfortable tap targets on touch screens (phones/tablets, or any
+   coarse pointer e.g. touch laptops) without changing desktop/mouse sizing */
+@media (max-width: 900px), (pointer: coarse) {
+  .btn         { min-height: 40px; }
+  .btn-sm      { min-height: 36px; }
+  .btn-xs      { min-height: 32px; }
+  .modal-close { width: 36px; height: 36px; }
+  #menuToggle  { min-width: 44px; min-height: 44px; }
+  .nav-item    { min-height: 46px; }
+  .tab         { min-height: 38px; }
+  a, button, .btn, .tab, [onclick] { touch-action: manipulation; }
+}
+
+/* Safe-area padding so content isn't hidden under the iPhone notch /
+   home-indicator (in both portrait and landscape) */
+.topbar {
+  padding-left:  max(28px, env(safe-area-inset-left));
+  padding-right: max(28px, env(safe-area-inset-right));
+}
+.sidebar { padding-bottom: env(safe-area-inset-bottom); }
+#loginPage .login-card { margin-bottom: env(safe-area-inset-bottom); }
+@media (max-width: 768px) {
+  .topbar {
+    padding-left:  max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+}
+
+/* Safety-net wrapper applied by JS (autoWrapTables) around any table
+   that isn't already inside a .table-wrap — guarantees every table in
+   the app (including ones with a wide inline min-width) scrolls
+   horizontally instead of breaking the layout on a phone screen. */
+.auto-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+
+/* Very small phones (iPhone SE / older Android, ≤380px wide) */
+@media (max-width: 380px) {
+  .content    { padding: 10px !important; }
+  .topbar     { padding-left: 10px; padding-right: 10px; gap: 8px; }
+  .btn        { padding: 8px 12px; font-size: 11.5px; }
+  .modal-body { padding: 14px; }
+}
+
+/* Leaflet map (Panchayat Admission Map) — shrink on phones/tablets so
+   it doesn't dominate the viewport, but stay usable */
+@media (max-width: 768px) {
+  #panchayatMapEl { height: 300px !important; }
+}
+
+/* Chart.js canvases: keep them from forcing horizontal overflow */
+@media (max-width: 768px) {
+  .chart-container { width: 100%; }
+}
+
+/* ============================================================
    DESKTOP ENHANCEMENTS (≥1025px) — v23 FULL
    ============================================================ */
 @media (min-width: 1025px) {
@@ -1237,7 +1308,7 @@ td .btn-xs + .btn-xs { margin-left: 3px; }
       <div id="loginFormPanel" style="display:none;margin-top:6px">
         <button class="login-role-btn" style="margin-bottom:14px" onclick="showRoleSelectScreen()"><i class="fas fa-arrow-left"></i> Back</button>
         <div class="login-field">
-          <label>Username</label>
+          <label id="loginUserLabel">Username</label>
           <div class="login-input-wrap">
             <i class="fas fa-user field-icon"></i>
             <input type="text" id="loginUser" placeholder="Enter your username" autocomplete="username" autocorrect="off" autocapitalize="off" spellcheck="false">
@@ -1850,6 +1921,17 @@ function enterAsRole(role){
   document.getElementById('loginError').classList.remove('show');
   document.getElementById('loginUser').value='';
   document.getElementById('loginPass').value='';
+  // Principal can sign in with either the local username OR their Supabase
+  // Cloud Sync email — one login, connects the app and Cloud Sync together.
+  const userLabel=document.getElementById('loginUserLabel');
+  const userInput=document.getElementById('loginUser');
+  if(role==='principal' && getCloudConfig()){
+    userLabel.textContent='Username or Cloud Sync Email';
+    userInput.placeholder='Username, or your Cloud Sync email';
+  } else {
+    userLabel.textContent='Username';
+    userInput.placeholder='Enter your username';
+  }
   document.getElementById('loginUser').focus();
 }
 
@@ -1861,6 +1943,18 @@ function doLogin(){
   const btn=document.getElementById('loginBtn');
   btn.disabled=true;
   btn.innerHTML='<i class="fas fa-spinner fa-spin"></i> Signing in…';
+
+  // Principal + an email-looking username + Cloud Sync already configured:
+  // try Supabase sign-in first. One successful sign-in both opens the app
+  // and connects Cloud Sync — no separate step in Settings needed.
+  if(role==='principal' && u.includes('@') && getCloudConfig()){
+    attemptPrincipalCloudLogin(u,p,btn);
+    return;
+  }
+  doLocalLogin(role,u,p,btn);
+}
+
+function doLocalLogin(role,u,p,btn){
   setTimeout(()=>{
     const users=ls('users')||[];
     const match=users.find(x=>x.role===role&&x.username===u&&x.password===p&&x.active!==false);
@@ -1878,6 +1972,38 @@ function doLogin(){
       btn.innerHTML='<i class="fas fa-sign-in-alt"></i> Sign In';
     }
   },400);
+}
+
+async function attemptPrincipalCloudLogin(email,pass,btn){
+  const cfg=getCloudConfig();
+  try{
+    if(!_sbClient) _sbClient=window.supabase.createClient(cfg.url,cfg.anonKey);
+    const { data, error } = await _sbClient.auth.signInWithPassword({email,password:pass});
+    if(!error && data?.user){
+      _sbUser=data.user;
+      localStorage.setItem('cloudSyncEmail', email);
+      document.getElementById('loginError').classList.remove('show');
+      const localPrincipal=(ls('users')||[]).find(x=>x.role==='principal');
+      loginAs(localPrincipal?{id:localPrincipal.id,name:localPrincipal.name,role:'principal'}:{id:'principal',name:'Principal',role:'principal'});
+      // Finish connecting Cloud Sync now that the app is open
+      cloudPullAll(false).then(()=>{ cloudSubscribeRealtime(); updateCloudSyncIndicator('synced'); })
+        .catch(()=>updateCloudSyncIndicator('error'));
+      return;
+    }
+    // A clear "wrong credentials" answer from Supabase — don't silently fall
+    // back to the local check, tell them plainly so it's not confusing.
+    if(error && !/network|fetch|failed to fetch/i.test(error.message||'')){
+      showLoginError('Incorrect email or password.');
+      document.getElementById('loginPass').value='';
+      document.getElementById('loginPass').focus();
+      btn.disabled=false;
+      btn.innerHTML='<i class="fas fa-sign-in-alt"></i> Sign In';
+      return;
+    }
+  }catch(e){ /* offline or Supabase unreachable — fall through to local login below */ }
+  // Offline / Supabase unreachable: fall back to the local username+password
+  // check so the Principal is never locked out of the ERP without internet.
+  doLocalLogin('principal',email,pass,btn);
 }
 function showLoginError(msg){
   const el=document.getElementById('loginError');
@@ -1936,7 +2062,11 @@ const NAV_ALL=[
   {id:'students',icon:'fas fa-user-graduate',label:'Students',roles:['principal','accountant']},
   {id:'needAttention',icon:'fas fa-exclamation-triangle',label:'Students Need Attention',roles:['principal','teacher']},
   {id:'panchayatMap',icon:'fas fa-map-marked-alt',label:'Panchayat Admission Map',roles:['principal']},
-  {id:'teachers',icon:'fas fa-chalkboard-teacher',label:'Teachers',roles:['principal']},
+  {id:'transferCert',icon:'fas fa-file-contract',label:'Transfer Certificate (TC)',roles:['principal','accountant']},
+  {id:'teachers',icon:'fas fa-chalkboard-teacher',label:'Staff',roles:['principal']},
+  {id:'teacherWorkload',icon:'fas fa-chart-bar',label:'Teacher Dashboard',roles:['principal']},
+  {id:'dismissal',icon:'fas fa-school',label:'Student Dismissal',roles:['principal']},
+  {id:'myDismissal',icon:'fas fa-school',label:'Student Dismissal',roles:['teacher']},
   {id:'feeCollection',icon:'fas fa-hand-holding-usd',label:'Fee Collection',roles:['principal','accountant']},
   {id:'dueReport',icon:'fas fa-file-invoice-dollar',label:'Due Report',roles:['principal','accountant']},
   {id:'dueNotice',icon:'fas fa-scroll',label:'Due Notice Cards',roles:['principal','accountant']},
@@ -1988,9 +2118,10 @@ function buildNav(){
   const role = currentUser.role;
   const groups = [
     { label:'📊 Overview', pages:['dashboard','schoolToday','studentSearch'] },
-    { label:'👨‍🎓 Students & Parents', pages:['students','needAttention','panchayatMap','promotion','conduct','coCurricular','ptmBooking'] },
+    { label:'👨‍🎓 Students & Parents', pages:['students','needAttention','panchayatMap','transferCert','promotion','conduct','coCurricular','ptmBooking'] },
     { label:'📚 Academic', pages:['attendance','monthlyAttendance','examRegister','teacherMarks','marks','reportCard','performance','top10','routine','syllabus','examMgmt','hallTicket','admitCard','lessonPlan','logbook'] },
-    { label:'👥 Staff', pages:['teachers','substitute'] },
+    { label:'👥 Staff', pages:['teachers','teacherWorkload','substitute'] },
+    { label:'🎒 Student Dismissal', pages:['dismissal','myDismissal'] },
     { label:'💰 Finance', pages:['feeCollection','dueReport','dueNotice','feeRegister','cashBook','feeSettings','allTransactions','finance','stock'] },
     { label:'📢 Communication', pages:['notices','calendar','helpdesk','complaints','documents'] },
     { label:'🏛 Government Records', pages:['govDashboard','govClassRecords','govFollowUp','govAgeVerification'] },
@@ -2015,8 +2146,8 @@ function buildNav(){
 
 function showPage(pageId){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.page===pageId));
-  const titles={dashboard:'Dashboard',schoolToday:'School Today',substituteHistory:'Substitute History',students:'Student Management',needAttention:'Students Need Attention',teachers:'Teacher Management',feeCollection:'Fee Collection',feeSettings:'Fee Settings',dueReport:'Due Report',dueNotice:'Due Notice Cards',feeRegister:'Fee Register',cashBook:'Society Cash Book',attendance:'Daily Attendance',examRegister:'Student Exam Register',marks:'Marks & Results',reportCard:'Report Card',routine:'Class Routine',notices:'Notice Board',calendar:'School Calendar',stock:'Stock & Shop',finance:'Financial Analysis',promotion:'Session Promotion',idCard:'ID Card Generator',dataManagement:'Data Management',settings:'Settings',academicSettings:'Class Manager & Academic Settings',sessionSettings:'Session Settings',syllabus:'Syllabus Manager',admitCard:'Admit Cards',performance:'Performance Analysis',monthlyAttendance:'Monthly Attendance Entry',allTransactions:'All Transactions',top10:'🏆 Top 10 Result Board',examMgmt:'📋 Exam Management',hallTicket:'🎫 Hall Ticket Generator',lessonPlan:'📖 Lesson Planning',logbook:'📓 Teaching Logbook',ptmBooking:'🤝 PTM Booking',conduct:'🛡️ Conduct & Discipline',coCurricular:'🏅 Co-Curricular Activities',substitute:'🔄 Substitute Teachers',helpdesk:'🎧 Helpdesk',complaints:'💬 Complaints',documents:'📁 Documents',assets:'💻 Asset Register',govDashboard:'🏛 Government ID Dashboard',govClassRecords:'🏛 Class-wise Government Records',govFollowUp:'⚠️ Pending Government ID Follow-up',govAgeVerification:'🎂 Age & Government Class Verification',studentSearch:'⚡ Fast Search'};
-  document.getElementById('topbarTitle').textContent=titles[pageId]||pageId;
+  const titles={dashboard:'Dashboard',schoolToday:'School Today',substituteHistory:'Substitute History',students:'Student Management',needAttention:'Students Need Attention',teachers:'Staff Management',feeCollection:'Fee Collection',feeSettings:'Fee Settings',dueReport:'Due Report',dueNotice:'Due Notice Cards',feeRegister:'Fee Register',cashBook:'Society Cash Book',attendance:'Daily Attendance',examRegister:'Student Exam Register',marks:'Marks & Results',reportCard:'Report Card',routine:'Class Routine',notices:'Notice Board',calendar:'School Calendar',stock:'Stock & Shop',finance:'Financial Analysis',promotion:'Session Promotion',idCard:'ID Card Generator',dataManagement:'Data Management',settings:'Settings',academicSettings:'Class Manager & Academic Settings',sessionSettings:'Session Settings',syllabus:'Syllabus Manager',admitCard:'Admit Cards',performance:'Performance Analysis',monthlyAttendance:'Monthly Attendance Entry',allTransactions:'All Transactions',top10:'🏆 Top 10 Result Board',examMgmt:'📋 Exam Management',hallTicket:'🎫 Hall Ticket Generator',lessonPlan:'📖 Lesson Planning',logbook:'📓 Teaching Logbook',ptmBooking:'🤝 PTM Booking',conduct:'🛡️ Conduct & Discipline',coCurricular:'🏅 Co-Curricular Activities',substitute:'🔄 Substitute Teachers',helpdesk:'🎧 Helpdesk',complaints:'💬 Complaints',documents:'📁 Documents',assets:'💻 Asset Register',govDashboard:'🏛 Government ID Dashboard',govClassRecords:'🏛 Class-wise Government Records',govFollowUp:'⚠️ Pending Government ID Follow-up',govAgeVerification:'🎂 Age & Government Class Verification',studentSearch:'⚡ Fast Search'};
+  document.getElementById('topbarTitle').textContent=(pageId==='teacherWorkload'?'👨‍🏫 Teacher Dashboard':pageId==='dismissal'||pageId==='myDismissal'?'🎒 Student Dismissal':(titles[pageId]||pageId));
   const content=document.getElementById('mainContent');
   // Reset any leftover transitions, set opacity 0, render, then fade in
   content.style.transition='none';
@@ -2066,7 +2197,11 @@ function renderPage(p){
     case 'students': return renderStudents();
     case 'needAttention': return renderNeedAttention();
     case 'panchayatMap': return renderPanchayatMap();
+    case 'transferCert': return renderTC();
     case 'teachers': return renderTeachers();
+    case 'teacherWorkload': return renderTeacherWorkloadDashboard();
+    case 'dismissal': return renderDismissalDashboard();
+    case 'myDismissal': return renderMyDismissal();
     case 'feeCollection': return renderFeeCollection();
     case 'dueReport': return renderDueReport();
     case 'dueNotice': return renderDueNotice();
@@ -2307,7 +2442,7 @@ function renderSubstitutePlanningBody(){
   }
   const dateKey=today();
   const day=CURRENT_ROUTINE_DAY;
-  const teachers=ls('teachers')||[];
+  const teachers=getTeachingStaff();
   const absentToday=teachers.filter(t=>isTeacherAbsentOn(t.name,dateKey,day));
   if(!absentToday.length){
     return `<div style="padding:14px;text-align:center" class="text-muted text-sm">✅ No teachers absent today — full routine running normally.</div>`;
@@ -2394,7 +2529,7 @@ function refreshSubstitutePlanning(){
 // ═══════════════════════════════════════════════════════════════════════
 function getSchoolWideMarksPending(){
   const session=getActiveSession();
-  const teachers=ls('teachers')||[];
+  const teachers=getTeachingStaff();
   const students=ls('students')||[];
   const marks=ls('marks')||{};
   const TERMS=['Term 1','Term 2','Term 3'];
@@ -2425,7 +2560,7 @@ function getTodayCollectionSummary(){
 function renderSchoolToday(){
   const session=getActiveSession();
   const students=(ls('students')||[]).filter(s=>s.session===session);
-  const teachers=ls('teachers')||[];
+  const teachers=getTeachingStaff();
   const attendance=ls('attendance')||{};
   const dateKey=today();
   const day=CURRENT_ROUTINE_DAY;
@@ -2671,7 +2806,7 @@ function refreshSchoolToday(){
 function renderSubstituteHistory(){
   const all=getSubstituteAssignments();
   const classes=getAllClasses();
-  const teachers=ls('teachers')||[];
+  const teachers=getTeachingStaff();
   return `
   <div class="section-header">
     <div class="section-title"><i class="fas fa-history"></i> Substitute History</div>
@@ -2735,8 +2870,7 @@ function renderAdminDashboard(){
   const students=ls('students')||[];
   const session=getActiveSession();
   const sessStudents=students.filter(s=>s.session===session);
-  const teachers=ls('teachers')||[];
-  const fees=ls('fees')||{};
+  const teachers=getTeachingStaff();
   const stock=ls('stock')||[];
   const sales=ls('sales')||[];
   const expenses=ls('expenses')||[];
@@ -2748,24 +2882,18 @@ function renderAdminDashboard(){
   const calendar=ls('calendar')||[];
   const teacherAbsentStore=ls('teacherAbsent')||{};
 
-  // ── Fee calculations ──
-  let totalCollected=0,admDue=0,monthlyDue=0,overdue=0;
-  const cm=currMonth();
-  const fs=ls('feeStructure')||{};
+  // ── Fee calculations (same canonical logic as Fee Register / Due Report) ──
+  let totalCollected=0,admDue=0,monthlyDue=0,overdue=0,examDue=0;
   sessStudents.forEach(st=>{
     const sf=fees[st.id]||{};
-    const admFee=sf.admissionPaid||0;
-    const admTotal=fs.admissionFee||500;
-    if(admFee<admTotal)admDue+=(admTotal-admFee);
-    totalCollected+=admFee;
-    for(let m=0;m<=cm;m++){
-      const mFee=(sf.monthly||{})[m];
-      const mAmt=(fs.monthlyFee||{})[st.class]||(fs.monthlyFee?.default)||300;
-      if(!mFee||!mFee.paid){monthlyDue+=mAmt;if(cm-m>=3)overdue+=mAmt}
-      else totalCollected+=mFee.amount||mAmt;
-    }
+    const t=computeStudentFeeTotals(st);
+    admDue+=t.admDue;
+    monthlyDue+=t.monthlyDueAmt;
+    examDue+=t.examDueAmt;
+    overdue+=t.overdueAmt;
+    totalCollected+=t.admPaid+t.monthlyPaidAmt+t.examPaidAmt;
   });
-  const totalDue=admDue+monthlyDue;
+  const totalDue=admDue+monthlyDue+examDue;
 
   const lowStock=stock.filter(s=>s.qty<=s.minQty);
   const todaySales=sales.filter(s=>s.date===today()).reduce((a,b)=>a+(b.total||0),0);
@@ -2851,6 +2979,18 @@ function renderAdminDashboard(){
       <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();showPage('govDashboard')" style="margin-left:auto">View Government Records</button>
     </div>
   </div>`;})()}
+
+  ${(()=>{const dSum=getSchoolDismissalSummary(session,today());return dSum.total?`
+  <div class="card" style="margin-bottom:20px;border-left:4px solid #1d4ed8;cursor:pointer" onclick="showPage('dismissal')">
+    <div class="card-title"><i class="fas fa-school" style="color:#1d4ed8"></i> 🎒 Today's Student Dismissal</div>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;font-size:13px;font-weight:700">
+      <span>Total: <b>${dSum.total}</b></span>
+      <span>Handed Over: <b style="color:#15803d">${dSum.handedOver}</b></span>
+      <span>Office Handover: <b style="color:#1d4ed8">${dSum.office}</b></span>
+      <span>Still in School: <b style="color:${dSum.waiting?'#dc2626':'#94a3b8'}">${dSum.waiting}</b></span>
+      <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();showPage('dismissal')" style="margin-left:auto">Open Dismissal</button>
+    </div>
+  </div>`:'';})()}
 
   <div class="stats-grid">
     <div class="stat-card danger" onclick="showPage('needAttention')">
@@ -3480,7 +3620,7 @@ function renderGovClassRecords(){
   <div style="background:white;border-radius:14px;border:1.5px solid #e8eef5;padding:14px 16px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
     <div style="font-size:14px;font-weight:800;color:#0d1f3c">${esc(selClass)} — Total ${students.length} Students</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap">
-      <button class="btn btn-sm btn-outline" onclick="printClassGovReport()"><i class="fas fa-print"></i> Print Class Report</button>
+      <button class="btn btn-sm btn-outline" onclick="printClassGovReport()"><i class="fas fa-print"></i> ${filter?`Print "${esc(GOV_BUCKET_META[filter].label||'')}" Only`:'Print Class Report'}</button>
       <button class="btn btn-sm btn-outline" onclick="exportGovClassCSV()"><i class="fas fa-file-csv"></i> Export CSV</button>
     </div>
   </div>
@@ -3554,10 +3694,13 @@ function exportGovClassCSV(){
 function printClassGovReport(){
   const session=getActiveSession();
   const cls=window._govSelClass||'';
+  const filter=window._govFilterBucket||''; // '' = all categories, else green/yellow/blue/red
   const students=(ls('students')||[]).filter(s=>s.session===session&&s.class===cls).sort((a,b)=>(a.roll||0)-(b.roll||0));
   const all=getAllGovRecords();
   const buckets={green:[],yellow:[],blue:[],red:[]};
   const rows=students.map(s=>{ const rec=all[s.id]||defaultGovRecord(); const b=govBucket(rec); buckets[b].push(s); return {s,rec,b}; });
+  const printRows = filter ? rows.filter(r=>r.b===filter) : rows;
+  const filterMeta = filter ? GOV_BUCKET_META[filter] : null;
   const sessionYear = parseInt(session)||new Date().getFullYear();
   const ageRule = getGovAgeRuleTextForClass(cls, sessionYear);
   const w=window.open('','_blank');
@@ -3579,19 +3722,20 @@ function printClassGovReport(){
   <div class="header">
     <h1>Children's Paradise School</h1>
     <div style="font-size:11px;color:#6b7a99">Uttar Radhanagar, Magrahat, South 24 Parganas, West Bengal</div>
-    <h2>CLASS-WISE GOVERNMENT STUDENT RECORD</h2>
-    <div style="font-size:11px;color:#6b7a99;margin-top:4px">Class: ${esc(cls)} &nbsp;|&nbsp; Session: ${esc(session)} &nbsp;|&nbsp; Date: ${esc(fmtDate(today()))}</div>
+    <h2>CLASS-WISE GOVERNMENT STUDENT RECORD${filterMeta?` — ${filterMeta.icon||''} ${esc(filterMeta.label||'')}`.trim():''}</h2>
+    <div style="font-size:11px;color:#6b7a99;margin-top:4px">Class: ${esc(cls)} &nbsp;|&nbsp; Session: ${esc(session)} &nbsp;|&nbsp; Date: ${esc(fmtDate(today()))}${filterMeta?` &nbsp;|&nbsp; Category: ${esc(filterMeta.label||'')} (${printRows.length} students)`:''}</div>
   </div>
   ${ageRule?`<div class="agerule">📋 Government Age Rule — ${ageRule.text}</div>`:''}
+  ${filterMeta?`<div class="summary" style="grid-template-columns:1fr"><div><b>${printRows.length}</b><br>${esc(filterMeta.label||'')}</div></div>`:`
   <div class="summary">
     <div><b>${students.length}</b><br>Total Students</div>
     <div>🟢 <b>${buckets.green.length}</b><br>ID Created</div>
     <div>🟡 <b>${buckets.yellow.length}</b><br>Form Submitted</div>
     <div>🔵 <b>${buckets.blue.length}</b><br>Existing ID in Govt. School</div>
     <div>🔴 <b>${buckets.red.length}</b><br>Form Not Submitted</div>
-  </div>
+  </div>`}
   <table><thead><tr><th>Roll</th><th>Student Name</th><th>Date of Birth</th><th>Phone</th><th>Government ID</th><th>School Name</th><th>Status</th><th>Remarks</th></tr></thead>
-  <tbody>${rows.map(({s,rec})=>{
+  <tbody>${printRows.map(({s,rec})=>{
     const dobYear = s.dob ? new Date(s.dob).getFullYear() : null;
     const ageMismatch = ageRule && dobYear && dobYear !== ageRule.birthYear;
     return `<tr><td>${s.roll||'—'}</td><td>${esc(s.name)}</td><td${ageMismatch?' style="color:#b91c1c;font-weight:800"':''}>${s.dob?esc(fmtDate(s.dob)):'—'}${ageMismatch?' ⚠️':''}</td><td>${esc(s.phone||'—')}</td><td>${esc(rec.banglarShikshaId||'—')}</td><td>${esc(rec.schoolName||'—')}</td><td>${esc((GOV_STATUS_META[rec.status]||{}).label||rec.status)}</td><td>${esc(rec.remarks||'—')}</td></tr>`;
@@ -3733,7 +3877,7 @@ function renderGovAgeVerification(){
       <option value="">All Classes</option>
       ${classes.map(c=>`<option value="${esc(c)}" ${c===selClass?'selected':''}>${esc(c)}</option>`).join('')}
     </select>
-    <button class="btn btn-sm btn-outline" onclick="printGovAgeVerification()"><i class="fas fa-print"></i> Print</button>
+    <button class="btn btn-sm btn-outline" onclick="printGovAgeVerification()"><i class="fas fa-print"></i> ${filterStatus?`Print "${esc(GOV_AGE_FILTER_LABELS[filterStatus]||'')}" Only`:'Print'}</button>
     <button class="btn btn-sm btn-outline" onclick="exportGovAgeVerificationCSV()"><i class="fas fa-file-csv"></i> Export CSV</button>
   </div>
 
@@ -3865,20 +4009,28 @@ function printGovAgeNote(studentId){
   w.document.close(); w.focus(); setTimeout(()=>{w.print();w.close();},400);
 }
 
+const GOV_AGE_FILTER_LABELS={match:'🟢 Match',diff:'🟠 Age/Class Difference',unreviewed:'⚠️ Needs Verification',na:'⚪ N/A (no DOB / rule)'};
 function printGovAgeVerification(){
   const session=getActiveSession();
   const sessionYear=parseInt(session)||new Date().getFullYear();
   const cls=window._govAgeClass||'';
+  const filterStatus=window._govAgeFilter||''; // '', 'match', 'diff', 'unreviewed', 'na'
   const students=(ls('students')||[]).filter(s=>s.session===session&&(!cls||s.class===cls)).sort((a,b)=>(a.class||'').localeCompare(b.class||'')||(a.roll||0)-(b.roll||0));
   const all=getAllGovRecords();
   const rows=students.map(s=>({s,rec:all[s.id]||defaultGovRecord(),v:computeAgeVerification(s,sessionYear)}));
+  let printRows=rows;
+  if(filterStatus==='match') printRows=rows.filter(r=>r.v.applicable&&!r.v.mismatch);
+  else if(filterStatus==='diff') printRows=rows.filter(r=>r.v.mismatch);
+  else if(filterStatus==='unreviewed') printRows=rows.filter(r=>r.v.mismatch&&r.rec.ageVerificationStatus==='Not Reviewed');
+  else if(filterStatus==='na') printRows=rows.filter(r=>!r.v.applicable);
+  const filterLabel=GOV_AGE_FILTER_LABELS[filterStatus]||'';
   const w=window.open('','_blank');
   w.document.write(`<!DOCTYPE html><html><head><title>Age & Class Verification</title>
   <style>body{font-family:'Nunito',sans-serif;padding:24px;color:#1a2740}.header{text-align:center;border-bottom:3px solid #1a3a6b;padding-bottom:14px;margin-bottom:16px}h1{font-size:20px;color:#1a3a6b;margin:0}h2{font-size:13px;color:#c9a84c;margin:4px 0 0}table{width:100%;border-collapse:collapse;font-size:10px}th{background:#1a3a6b;color:white;padding:6px;text-align:left}td{padding:6px;border:1px solid #d0dbe8}.footer{margin-top:30px;display:flex;justify-content:space-between;font-size:11px}@page{size:A4 landscape;margin:12mm}</style>
   </head><body>
-  <div class="header"><h1>Children's Paradise School</h1><div style="font-size:11px;color:#6b7a99">Uttar Radhanagar, Magrahat, South 24 Parganas, West Bengal</div><h2>AGE & GOVERNMENT CLASS VERIFICATION — ${cls?esc(cls):'All Classes'} (Session ${esc(session)})</h2></div>
+  <div class="header"><h1>Children's Paradise School</h1><div style="font-size:11px;color:#6b7a99">Uttar Radhanagar, Magrahat, South 24 Parganas, West Bengal</div><h2>AGE & GOVERNMENT CLASS VERIFICATION — ${cls?esc(cls):'All Classes'} (Session ${esc(session)})${filterLabel?` — ${esc(filterLabel)} (${printRows.length} students)`:''}</h2></div>
   <table><thead><tr><th>Roll</th><th>Name</th><th>DOB</th><th>Age</th><th>School Class</th><th>Govt Age Class</th><th>Government ID</th><th>Status</th><th>Remarks</th></tr></thead>
-  <tbody>${rows.map(({s,rec,v})=>`<tr><td>${s.roll||'—'}</td><td>${esc(s.name)}</td><td>${fmtDate(s.dob)}</td><td>${v.age===null?'—':v.age}</td><td>${esc(s.class)}</td><td>${esc(v.ageAppropriateClass||'—')}</td><td>${esc(rec.banglarShikshaId||'—')}</td><td>${v.applicable?(v.mismatch?'AGE/CLASS DIFFERENCE':'MATCH'):'N/A'}</td><td>${esc(rec.ageDifferenceExplanation||'—')}</td></tr>`).join('')}</tbody></table>
+  <tbody>${printRows.map(({s,rec,v})=>`<tr><td>${s.roll||'—'}</td><td>${esc(s.name)}</td><td>${fmtDate(s.dob)}</td><td>${v.age===null?'—':v.age}</td><td>${esc(s.class)}</td><td>${esc(v.ageAppropriateClass||'—')}</td><td>${esc(rec.banglarShikshaId||'—')}</td><td>${v.applicable?(v.mismatch?'AGE/CLASS DIFFERENCE':'MATCH'):'N/A'}</td><td>${esc(rec.ageDifferenceExplanation||'—')}</td></tr>`).join('')}</tbody></table>
   <div class="footer"><div>Office Signature: _______________</div><div>Principal Signature: _______________</div></div>
   </body></html>`);
   w.document.close(); w.focus(); setTimeout(()=>{w.print();w.close();},400);
@@ -4178,7 +4330,7 @@ function renderStudents(){
   <!-- Filters + Table Card -->
   <div style="background:white;border-radius:16px;box-shadow:0 2px 20px rgba(26,58,107,.08);border:1.5px solid #e8eef5;overflow:hidden">
     <!-- Filter bar -->
-    <div style="padding:16px 20px;border-bottom:1.5px solid #f0f4ff;display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:center">
+    <div style="padding:16px 20px;border-bottom:1.5px solid #f0f4ff;display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:center">
       <div style="position:relative">
         <i class="fas fa-search" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#9aa8c0;font-size:13px;pointer-events:none"></i>
         <input type="text" id="stuSearch" placeholder="Search name, roll, phone, ID…"
@@ -4197,6 +4349,12 @@ function renderStudents(){
         <option value="due">Has Dues</option>
         <option value="clear">Fee Clear</option>
         <option value="admpending">Adm Fee Pending</option>
+      </select>
+      <select id="stuEnrollFilter" onchange="filterStudents()"
+        style="padding:9px 12px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px;outline:none;font-family:inherit;color:#374151;background:white;cursor:pointer">
+        <option value="active" selected>Active</option>
+        <option value="transferred">Transferred</option>
+        <option value="">All Students</option>
       </select>
       <div style="font-size:12px;color:#6b7a99;font-weight:700;white-space:nowrap" id="stuCount">— students</div>
     </div>
@@ -4354,10 +4512,13 @@ function _doFilterStudents(){
   const q   = (document.getElementById('stuSearch')?.value||'').toLowerCase().trim();
   const cls = document.getElementById('stuClassFilter')?.value||'';
   const fee = document.getElementById('stuFeeFilter')?.value||'';
+  const enroll = document.getElementById('stuEnrollFilter')?document.getElementById('stuEnrollFilter').value:'active';
   const session = getActiveSession();
   // Cache reads
   const allStudents = ls('students')||[];
   let students = allStudents.filter(s=>s.session===session);
+  if(enroll==='active') students = students.filter(s=>s.enrollmentStatus!=='transferred');
+  else if(enroll==='transferred') students = students.filter(s=>s.enrollmentStatus==='transferred');
   if(cls) students = students.filter(s=>s.class===cls);
   if(q)   students = students.filter(s=>
     (s.name+(s.fatherName||'')+(s.phone||'')+(s.roll||'')+(s.studentId||'')).toLowerCase().includes(q)
@@ -4424,99 +4585,152 @@ function openFeeCollection(studentId){
 // ===========================
 //  TEACHERS
 // ===========================
+// Teaching vs non-teaching staff — records without staffType are treated
+// as Teaching (backward-compatible with everything added before this field).
+function getTeachingStaff(){ return (ls('teachers')||[]).filter(t=>t.staffType!=='Non-Teaching'); }
+function getNonTeachingStaff(){ return (ls('teachers')||[]).filter(t=>t.staffType==='Non-Teaching'); }
+const STAFF_CATEGORIES=['Office Staff','Accountant / Clerk','Cleaning Staff','Security / Guard','Peon / Helper','Librarian','Driver','Other'];
+
 function renderTeachers(){
   const teachers=ls('teachers')||[];
+  const teaching=teachers.filter(t=>t.staffType!=='Non-Teaching');
+  const nonTeaching=teachers.filter(t=>t.staffType==='Non-Teaching');
   const totalSalary = teachers.reduce((s,t)=>s+(t.monthlySalary||0),0);
+  const filter=window._staffFilter||'all';
+  const shown = filter==='teaching'?teaching : filter==='nonteaching'?nonTeaching : teachers;
   return `
   <div class="section-header">
-    <div class="section-title"><i class="fas fa-chalkboard-teacher" style="color:var(--gold)"></i> Teacher Management</div>
+    <div class="section-title"><i class="fas fa-users" style="color:var(--gold)"></i> Staff Management</div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       ${totalSalary>0?`<span style="background:#fee2e2;color:#991b1b;padding:6px 14px;border-radius:8px;font-weight:800;font-size:13px"><i class="fas fa-wallet"></i> Total Monthly Salary: ₹${totalSalary.toLocaleString('en-IN')}</span>`:''}
-      <button class="btn btn-primary" onclick="openAddTeacher()"><i class="fas fa-plus"></i> Add Teacher</button>
+      <button class="btn btn-primary" onclick="openAddTeacher(null,'Teaching')"><i class="fas fa-plus"></i> Add Teacher</button>
+      <button class="btn btn-gold" onclick="openAddTeacher(null,'Non-Teaching')"><i class="fas fa-user-plus"></i> Add Staff</button>
     </div>
+  </div>
+  <div class="tabs no-print" style="margin-bottom:14px">
+    <button class="tab ${filter==='all'?'active':''}" onclick="setStaffFilter('all')">All Staff (${teachers.length})</button>
+    <button class="tab ${filter==='teaching'?'active':''}" onclick="setStaffFilter('teaching')">👩‍🏫 Teaching (${teaching.length})</button>
+    <button class="tab ${filter==='nonteaching'?'active':''}" onclick="setStaffFilter('nonteaching')">🧹 Non-Teaching (${nonTeaching.length})</button>
   </div>
   <div class="card">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Name</th><th>Designation</th><th>Monthly Salary</th><th>Classes</th><th>Username</th><th>Phone</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Name</th><th>Type</th><th>Designation</th><th>Monthly Salary</th><th>Classes / Category</th><th>Username</th><th>Phone</th><th>Actions</th></tr></thead>
         <tbody>
-          ${teachers.length?teachers.map(t=>`
+          ${shown.length?shown.map(t=>{
+            const isTeaching=t.staffType!=='Non-Teaching';
+            return `
           <tr>
             <td><strong>${esc(t.name)}</strong></td>
+            <td>${isTeaching?'<span class="badge badge-info">👩‍🏫 Teaching</span>':'<span class="badge" style="background:#ede9fe;color:#5b21b6">🧹 Non-Teaching</span>'}</td>
             <td><span class="badge badge-info">${esc(t.designation||'—')}</span></td>
             <td style="font-weight:800;color:${t.monthlySalary?'#991b1b':'#94a3b8'}">
               ${t.monthlySalary?`₹${t.monthlySalary.toLocaleString('en-IN')}`:'<span style="color:#94a3b8">Not set</span>'}
             </td>
-            <td>${(t.classes||[]).map(c=>`<span class="tag">${c}</span>`).join('')||'—'}</td>
-            <td><span class="badge badge-info">${esc(t.username)}</span></td>
+            <td>${isTeaching?((t.classes||[]).map(c=>`<span class="tag">${c}</span>`).join('')||'—'):`<span class="badge" style="background:#f1f5f9;color:#475569">${esc(t.staffCategory||'—')}</span>`}</td>
+            <td>${t.username?`<span class="badge badge-info">${esc(t.username)}</span>`:'<span class="text-muted text-xs">No login</span>'}</td>
             <td>${t.phone||'—'}</td>
             <td>
               <button class="btn btn-sm btn-warning" onclick="openEditTeacher('${t.id}')"><i class="fas fa-edit"></i></button>
               <button class="btn btn-sm btn-danger" onclick="deleteTeacher('${t.id}')"><i class="fas fa-trash"></i></button>
             </td>
-          </tr>`).join(''):'<tr><td colspan="7" class="text-center text-muted" style="padding:30px">No teachers added yet</td></tr>'}
+          </tr>`;}).join(''):'<tr><td colspan="8" class="text-center text-muted" style="padding:30px">No staff in this category yet</td></tr>'}
         </tbody>
       </table>
     </div>
   </div>`;
 }
+function setStaffFilter(f){ window._staffFilter=f; showPage('teachers'); }
 
-function openAddTeacher(editId){
+function openAddTeacher(editId,forceType){
   const teachers=ls('teachers')||[];
   const t=editId?teachers.find(x=>x.id===editId):{};
-  openModal(editId?'Edit Teacher':'Add Teacher',`
+  const staffType = t.staffType || forceType || 'Teaching';
+  const isNT = staffType==='Non-Teaching';
+  openModal(editId?'Edit Staff':(isNT?'Add Staff':'Add Teacher'),`
+  <div class="form-group" style="background:#f8faff;border-radius:10px;padding:10px 12px;margin-bottom:4px">
+    <label>Staff Type</label>
+    <div style="display:flex;gap:16px;margin-top:4px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:700;font-size:13px">
+        <input type="radio" name="tStaffType" value="Teaching" ${!isNT?'checked':''} onchange="toggleStaffTypeFields(false)"> 👩‍🏫 Teaching Staff
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:700;font-size:13px">
+        <input type="radio" name="tStaffType" value="Non-Teaching" ${isNT?'checked':''} onchange="toggleStaffTypeFields(true)"> 🧹 Non-Teaching Staff
+      </label>
+    </div>
+  </div>
   <div class="form-row">
-    <div class="form-group"><label>Full Name *</label><input id="tName" value="${esc(t.name||'')}" placeholder="Teacher name" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit"></div>
+    <div class="form-group"><label>Full Name *</label><input id="tName" value="${esc(t.name||'')}" placeholder="Staff name" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit"></div>
     <div class="form-group"><label>Phone</label><input id="tPhone" value="${t.phone||''}" placeholder="Mobile number" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit"></div>
   </div>
   <div class="form-row">
     <div class="form-group"><label>Designation</label>
-      <input id="tDesig" value="${esc(t.designation||'')}" list="tDesigList" placeholder="e.g. Head Teacher, Teacher" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit">
-      <datalist id="tDesigList">${['Principal','Head Teacher','Assistant Teacher','Teacher','Office Staff','Peon','Guard'].map(d=>`<option value="${d}">`).join('')}</datalist>
+      <input id="tDesig" value="${esc(t.designation||'')}" list="tDesigList" placeholder="e.g. Head Teacher, Office Staff" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit">
+      <datalist id="tDesigList">${['Principal','Head Teacher','Assistant Teacher','Teacher','Office Staff','Accountant / Clerk','Cleaning Staff','Security / Guard','Peon / Helper','Librarian','Driver'].map(d=>`<option value="${d}">`).join('')}</datalist>
     </div>
     <div class="form-group"><label>Fixed Monthly Salary (₹)</label>
       <input id="tSalary" type="number" value="${t.monthlySalary||''}" placeholder="e.g. 5000" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:15px;font-weight:700">
     </div>
   </div>
-  <div class="form-row">
-    <div class="form-group"><label>Username *</label><input id="tUser" value="${t.username||''}" placeholder="Login username" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit"></div>
-    <div class="form-group"><label>Password *</label><input id="tPass" type="password" value="${t.password||''}" placeholder="Login password" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit"></div>
+
+  <div class="form-group" id="tCategoryGroup" style="display:${isNT?'block':'none'}">
+    <label>Staff Category</label>
+    <select id="tCategory" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit">
+      ${STAFF_CATEGORIES.map(c=>`<option value="${c}" ${t.staffCategory===c?'selected':''}>${c}</option>`).join('')}
+    </select>
   </div>
-  <div class="form-group">
-    <label>Assign Classes</label>
-    <div style="display:flex;flex-wrap:wrap;gap:6px">
-      ${getAllClasses().map(c=>`<label style="display:flex;align-items:center;gap:4px;background:#f1f5f9;padding:6px 10px;border-radius:8px;cursor:pointer;font-size:13px">
-        <input type="checkbox" value="${c}" ${(t.classes||[]).includes(c)?'checked':''} class="tClassChk"> ${c}
-      </label>`).join('')}
+
+  <div id="tLoginSection">
+    <div class="form-row">
+      <div class="form-group"><label>Username <span style="font-weight:400;color:#94a3b8;font-size:11px">(leave blank — no ERP login needed)</span></label><input id="tUser" value="${t.username||''}" placeholder="Login username" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit"></div>
+      <div class="form-group"><label>Password</label><input id="tPass" type="password" value="${t.password||''}" placeholder="Login password" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit"></div>
     </div>
+    <div class="text-xs text-muted" style="margin:-6px 0 10px 2px">ℹ️ A login is only created for Teaching Staff (Teacher role) — Non-Teaching staff don't get an ERP login in this version.</div>
   </div>
-  <div class="form-group">
-    <label>Assign Subjects</label>
-    <div style="display:flex;flex-wrap:wrap;gap:6px">
-      ${SUBJECTS_DEFAULT.map(s=>`<label style="display:flex;align-items:center;gap:4px;background:#f1f5f9;padding:6px 10px;border-radius:8px;cursor:pointer;font-size:13px">
-        <input type="checkbox" value="${s}" ${(t.subjects||[]).includes(s)?'checked':''} class="tSubChk"> ${s}
-      </label>`).join('')}
+
+  <div id="tTeachingFields" style="display:${isNT?'none':'block'}">
+    <div class="form-group">
+      <label>Assign Classes</label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${getAllClasses().map(c=>`<label style="display:flex;align-items:center;gap:4px;background:#f1f5f9;padding:6px 10px;border-radius:8px;cursor:pointer;font-size:13px">
+          <input type="checkbox" value="${c}" ${(t.classes||[]).includes(c)?'checked':''} class="tClassChk"> ${c}
+        </label>`).join('')}
+      </div>
     </div>
-  </div>
-  <div class="form-group" style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;padding:12px">
-    <label>Marks Entry Assignments <span style="font-weight:400;color:#92400e;font-size:11px">(exact class + subject this teacher checks copies &amp; enters marks for, in Teacher Marks Entry)</span></label>
-    <div style="display:flex;gap:8px;margin:8px 0">
-      <select id="taClass" onchange="taRefreshSubjectOptions()" style="flex:1;padding:9px;border:2px solid var(--border);border-radius:8px;font-family:inherit">
-        ${getAllClasses().map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
-      </select>
-      <select id="taSubject" style="flex:1;padding:9px;border:2px solid var(--border);border-radius:8px;font-family:inherit">
-        ${getClassSubjectLabelsAllTerms(getAllClasses()[0]).map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}
-      </select>
-      <button type="button" class="btn btn-outline" onclick="taAddAssignment()"><i class="fas fa-plus"></i> Add</button>
+    <div class="form-group">
+      <label>Assign Subjects</label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${SUBJECTS_DEFAULT.map(s=>`<label style="display:flex;align-items:center;gap:4px;background:#f1f5f9;padding:6px 10px;border-radius:8px;cursor:pointer;font-size:13px">
+          <input type="checkbox" value="${s}" ${(t.subjects||[]).includes(s)?'checked':''} class="tSubChk"> ${s}
+        </label>`).join('')}
+      </div>
     </div>
-    <div id="taList" style="display:flex;flex-wrap:wrap;gap:6px">
-      ${(t.teachAssignments||[]).map(a=>taPairHTML(a.class,a.subject)).join('')}
+    <div class="form-group" style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;padding:12px">
+      <label>Marks Entry Assignments <span style="font-weight:400;color:#92400e;font-size:11px">(exact class + subject this teacher checks copies &amp; enters marks for, in Teacher Marks Entry)</span></label>
+      <div style="display:flex;gap:8px;margin:8px 0">
+        <select id="taClass" onchange="taRefreshSubjectOptions()" style="flex:1;padding:9px;border:2px solid var(--border);border-radius:8px;font-family:inherit">
+          ${getAllClasses().map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+        </select>
+        <select id="taSubject" style="flex:1;padding:9px;border:2px solid var(--border);border-radius:8px;font-family:inherit">
+          ${getClassSubjectLabelsAllTerms(getAllClasses()[0]).map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}
+        </select>
+        <button type="button" class="btn btn-outline" onclick="taAddAssignment()"><i class="fas fa-plus"></i> Add</button>
+      </div>
+      <div id="taList" style="display:flex;flex-wrap:wrap;gap:6px">
+        ${(t.teachAssignments||[]).map(a=>taPairHTML(a.class,a.subject)).join('')}
+      </div>
     </div>
   </div>
   `,[
-    {label:editId?'Update Teacher':'Save Teacher',cls:'btn-primary',onclick:`saveTeacher('${editId||''}')`},
+    {label:editId?'Update Staff':'Save Staff',cls:'btn-primary',onclick:`saveTeacher('${editId||''}')`},
     {label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}
   ],'modal-lg');
+}
+function toggleStaffTypeFields(isNonTeaching){
+  const cat=document.getElementById('tCategoryGroup');
+  const teach=document.getElementById('tTeachingFields');
+  if(cat) cat.style.display = isNonTeaching?'block':'none';
+  if(teach) teach.style.display = isNonTeaching?'none':'block';
 }
 function getClassSubjectLabelsAllTerms(cls){
   const set=new Set();
@@ -4552,33 +4766,54 @@ function saveTeacher(editId){
   const salary     = parseFloat(document.getElementById('tSalary').value)||0;
   const username   = document.getElementById('tUser').value.trim();
   const password   = document.getElementById('tPass').value.trim();
-  const classes    = [...document.querySelectorAll('.tClassChk:checked')].map(x=>x.value);
-  const subjects   = [...document.querySelectorAll('.tSubChk:checked')].map(x=>x.value);
-  const teachAssignments = [...document.querySelectorAll('#taList .taPair')].map(el=>({class:el.dataset.cls, subject:el.dataset.subject}));
-  if(!name||!username||!password){toast('Fill required fields','error');return}
+  const staffType  = document.querySelector('input[name="tStaffType"]:checked')?.value || 'Teaching';
+  const isNT       = staffType==='Non-Teaching';
+  const staffCategory = isNT ? (document.getElementById('tCategory')?.value||'') : '';
+  // Non-teaching staff have no classes/subjects/marks-entry role in this ERP
+  const classes    = isNT ? [] : [...document.querySelectorAll('.tClassChk:checked')].map(x=>x.value);
+  const subjects   = isNT ? [] : [...document.querySelectorAll('.tSubChk:checked')].map(x=>x.value);
+  const teachAssignments = isNT ? [] : [...document.querySelectorAll('#taList .taPair')].map(el=>({class:el.dataset.cls, subject:el.dataset.subject}));
+  if(!name){toast('Enter a name','error');return}
+  // Login is only meaningful for Teaching Staff (Teacher role) — if a
+  // username/password was entered for Non-Teaching staff, ignore it rather
+  // than silently granting a Teacher-level login to someone who isn't one.
+  if(username && password && isNT){
+    toast('Login isn\'t available for Non-Teaching staff yet — saved without a login.','error');
+  }
+  const wantsLogin = !isNT && username && password;
   const teachers=ls('teachers')||[];
   const users=ls('users')||[];
   if(editId){
     const idx=teachers.findIndex(t=>t.id===editId);
-    if(idx>=0)teachers[idx]={...teachers[idx],name,phone,designation:desig,monthlySalary:salary,username,password,classes,subjects,teachAssignments};
+    if(idx>=0)teachers[idx]={...teachers[idx],name,phone,designation:desig,monthlySalary:salary,
+      staffType, staffCategory,
+      username:wantsLogin?username:'', password:wantsLogin?password:'',
+      classes,subjects,teachAssignments};
     const uidx=users.findIndex(u=>u.id===editId||u.teacherId===editId);
-    if(uidx>=0)users[uidx]={...users[uidx],username,password,name};
-    else users.push({id:editId,username,password,name,role:'teacher',teacherId:editId,active:true});
+    if(wantsLogin){
+      if(uidx>=0) users[uidx]={...users[uidx],username,password,name};
+      else users.push({id:editId,username,password,name,role:'teacher',teacherId:editId,active:true});
+    } else if(uidx>=0){
+      users.splice(uidx,1); // staff type switched away from a login, or login cleared
+    }
   } else {
     const id=uid();
-    teachers.push({id,name,phone,designation:desig,monthlySalary:salary,username,password,classes,subjects,teachAssignments,createdAt:today()});
-    users.push({id,username,password,name,role:'teacher',teacherId:id,active:true});
+    teachers.push({id,name,phone,designation:desig,monthlySalary:salary,
+      staffType, staffCategory,
+      username:wantsLogin?username:'', password:wantsLogin?password:'',
+      classes,subjects,teachAssignments,createdAt:today()});
+    if(wantsLogin) users.push({id,username,password,name,role:'teacher',teacherId:id,active:true});
   }
   ss('teachers',teachers);ss('users',users);
-  toast('Teacher saved ✅');closeModal();showPage('teachers');
+  toast((isNT?'Staff':'Teacher')+' saved ✅');closeModal();showPage('teachers');
 }
 
 function openEditTeacher(id){openAddTeacher(id)}
 function deleteTeacher(id){
-  if(!confirm('Delete this teacher?'))return;
+  if(!confirm('Delete this staff member?'))return;
   ss('teachers',(ls('teachers')||[]).filter(t=>t.id!==id));
   ss('users',(ls('users')||[]).filter(u=>u.id!==id&&u.teacherId!==id));
-  toast('Teacher deleted');showPage('teachers');
+  toast('Staff member deleted');showPage('teachers');
 }
 
 // ===========================
@@ -4800,21 +5035,64 @@ Children's Paradise School</textarea>
   `;
 }
 
+// ─────────────────────────────────────────────────────
+//  SINGLE SOURCE OF TRUTH for per-student fee totals.
+//  Fee Register, Due Report, and Due Notice all call this
+//  function so their numbers can never drift apart again —
+//  it respects any per-student custom admission total / exam
+//  amount saved from the Fee Register, instead of silently
+//  recomputing from the generic class fee structure.
+// ─────────────────────────────────────────────────────
+function computeStudentFeeTotals(s){
+  const fees = ls('fees')||{};
+  const sf   = fees[s.id]||{};
+  const cm   = currMonth(); // 0-indexed current month
+
+  // Admission — use the student's own saved total (set/edited in Fee
+  // Register) if present, else fall back to the class fee structure.
+  const admTotal = (sf.admissionTotal!==undefined && sf.admissionTotal!==null)
+    ? (parseFloat(sf.admissionTotal)||0)
+    : (parseFloat(getEffectiveFee(s.id,'admission',s.class))||0);
+  const admPaid  = parseFloat(sf.admissionPaid)||0;
+  const admDue   = admTotal>0 ? Math.max(0, admTotal-admPaid) : 0;
+
+  // Monthly
+  const monthly = parseFloat(getEffectiveFee(s.id,'monthly',s.class))||0;
+  let monthPaidCount=0, monthDueCount=0, overdueMonths=0;
+  for(let m=0;m<=cm;m++){
+    const mf=(sf.monthly||{})[m];
+    if(mf&&mf.paid){ monthPaidCount++; }
+    else if(monthly>0){ monthDueCount++; if(cm-m>=3) overdueMonths++; }
+  }
+  const monthlyPaidAmt = (Object.values(sf.monthly||{}).filter(x=>x&&x.paid).length)*monthly;
+  const monthlyDueAmt  = monthDueCount*monthly;
+  const overdueAmt     = overdueMonths*monthly;
+
+  // Exam — use the student's own saved per-term amount if present, else
+  // fall back to the class fee structure. Not counted as due unless an
+  // exam fee actually applies (matches Fee Register's grey "none" state).
+  const examTerms=[['Term 1','exam1'],['Term 2','exam2'],['Term 3','exam3']];
+  let examPaidAmt=0, examDueAmt=0;
+  examTerms.forEach(([t,key])=>{
+    const ef=(sf.exam||{})[t];
+    const structFee=parseFloat(getEffectiveFee(s.id,key,s.class))||0;
+    const amt=(ef&&ef.amount!==undefined&&ef.amount!==null)?(parseFloat(ef.amount)||0):structFee;
+    if(ef&&ef.paid) examPaidAmt+=amt;
+    else if(amt>0) examDueAmt+=amt;
+  });
+
+  const totalPaid = admPaid+monthlyPaidAmt+examPaidAmt;
+  const totalDue  = admDue+monthlyDueAmt+examDueAmt;
+
+  return { admTotal, admPaid, admDue, monthly, monthPaidCount, monthDueCount,
+    monthlyPaidAmt, monthlyDueAmt, overdueAmt, examPaidAmt, examDueAmt,
+    totalPaid, totalDue };
+}
+
 function calcStudentDue(s){
-  const fees    = ls('fees')||{};
-  const sf      = fees[s.id]||{};
-  const admTotal = getEffectiveFee(s.id,'admission',s.class);
-  const admPaid  = sf.admissionPaid||0;
-  const admDue   = Math.max(0, admTotal - admPaid);
-
-  const monthly  = getEffectiveFee(s.id,'monthly',s.class);
-  const mPaid    = Object.values(sf.monthly||{}).filter(x=>x&&x.paid).length;
-  const cm       = currMonth(); // 0-indexed current month
-  // months due = months elapsed (0..cm inclusive = cm+1 total) minus paid
-  const mDueMonths = Math.max(0, (cm + 1) - mPaid);
-  const mDueAmt  = mDueMonths * monthly;
-
-  return { admDue, mDueMonths, mDueAmt, monthly, admTotal, admPaid, mPaid };
+  const t = computeStudentFeeTotals(s);
+  return { admDue:t.admDue, mDueMonths:t.monthDueCount, mDueAmt:t.monthlyDueAmt,
+    monthly:t.monthly, admTotal:t.admTotal, admPaid:t.admPaid, mPaid:t.monthPaidCount };
 }
 
 function generateDueNotices(){
@@ -6315,42 +6593,32 @@ function loadFeeRegister(){
 
   students.forEach(s=>{
     const sf = fees[s.id]||{};
+    // Canonical totals — identical numbers to Due Report / Due Notice
+    const t = computeStudentFeeTotals(s);
+    const admTotal = t.admTotal, admPaid = t.admPaid, admDue = t.admDue;
 
-    // ── ADMISSION ──────────────────────────────────────────────────
-    // admTotal: use custom value if set, else from fee settings, else 0
-    const admTotalRaw = (sf.admissionTotal !== undefined && sf.admissionTotal !== null)
-      ? sf.admissionTotal
-      : getEffectiveFee(s.id,'admission',s.class);
-    const admTotal = parseFloat(admTotalRaw)||0;
-    const admPaid  = parseFloat(sf.admissionPaid)||0;
-    // Due = only if admTotal > 0 (i.e. school has set an admission fee)
-    const admDue   = admTotal > 0 ? Math.max(0, admTotal - admPaid) : 0;
-
-    // ── MONTHLY ────────────────────────────────────────────────────
-    const monthly = parseFloat(getEffectiveFee(s.id,'monthly',s.class))||0;
-    let monthCells = '', monthPaidCount = 0, monthDueCount = 0;
+    // ── MONTHLY (cell rendering only — amounts come from computeStudentFeeTotals) ──
+    const monthly = t.monthly;
+    let monthCells = '';
     for(let m=0;m<12;m++){
       const paid = !!(sf.monthly||{})[m]?.paid;
       let state;
       if(paid){
         state='paid';
-        monthPaidCount++;
       } else if(m<=cm){
-        // Only count as due if monthly fee is configured (>0)
         state = monthly>0 ? 'due' : 'upcoming';
-        if(monthly>0) monthDueCount++;
       } else {
         state='upcoming';
       }
       monthCells += `<td style="padding:2px 3px">${monthBox(s, m, state)}</td>`;
     }
-    const monthlyPaidAmt = monthPaidCount * monthly;
-    const monthlyDueAmt  = monthDueCount  * monthly;
+    const monthlyPaidAmt = t.monthlyPaidAmt;
+    const monthlyDueAmt  = t.monthlyDueAmt;
 
-    // ── EXAM ────────────────────────────────────────────────────────
-    let examCells = '', examPaidAmt = 0, examDueAmt = 0;
-    examTerms.forEach((t,i)=>{
-      const ex    = (sf.exam||{})[t];
+    // ── EXAM (cell rendering only — amounts come from computeStudentFeeTotals) ──
+    let examCells = '';
+    examTerms.forEach((tm,i)=>{
+      const ex    = (sf.exam||{})[tm];
       const termKey = 'exam'+(i+1);
       const examFee = parseFloat(getEffectiveFee(s.id,termKey,s.class))||0;
       const examAmt = parseFloat(ex?.amount)||examFee;
@@ -6358,21 +6626,20 @@ function loadFeeRegister(){
       let state;
       if(ex?.paid){
         state='paid';
-        examPaidAmt += examAmt;
       } else if(examFee>0 || examAmt>0){
         // Only mark as due if there's actually an exam fee set
         state='due';
-        examDueAmt += examAmt;
       } else {
         // No exam fee configured — show grey, don't count as due
         state='none';
       }
-      examCells += `<td style="padding:2px 3px">${examBox(s, t, i, state)}</td>`;
+      examCells += `<td style="padding:2px 3px">${examBox(s, tm, i, state)}</td>`;
     });
+    const examPaidAmt = t.examPaidAmt, examDueAmt = t.examDueAmt;
 
     // ── TOTALS ─────────────────────────────────────────────────────
-    const totalPaid = admPaid + monthlyPaidAmt + examPaidAmt;
-    const totalDue  = admDue  + monthlyDueAmt  + examDueAmt;
+    const totalPaid = t.totalPaid;
+    const totalDue  = t.totalDue;
     totalPaidAll += totalPaid;
     totalDueAll  += totalDue;
 
@@ -7416,7 +7683,7 @@ function openRoutineEditor(){
   const cls = document.getElementById('routineClass')?.value || getAllClasses()[0];
   const routine = ls('routine')||{};
   const cr = routine[cls]||{};
-  const teachers = ls('teachers')||[];
+  const teachers = getTeachingStaff();
   const allDays = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const clsSubs = getExamRegisterSubjectNames(cls);
   const subNames = clsSubs.length ? clsSubs : SUBJECTS_DEFAULT;
@@ -9383,7 +9650,7 @@ function clearAllData(){
 // ═══════════════════════════════════════════════════════════════════════
 //  CLOUD SYNC (Supabase) — auto-sync + manual backup/restore, multi-device
 // ═══════════════════════════════════════════════════════════════════════
-const CLOUD_SYNC_KEYS=['users','students','teachers','fees','attendance','marks','notices','calendar','stock','sales','expenses','routine','classSubjects','ageRanges','feeStructure','activeSession','receipts','idCardLayout','studentFollowUps','attentionSettings','academicHistory','syllabus','teacherAbsent','periodTimings','settings','sessions','substituteAssignments','examRegisterMarks','marksSourceLog','marksSubmissionDeadline','govRecords','govSubmissionHistory','govActivityLog','govAgeRules'];
+const CLOUD_SYNC_KEYS=['users','students','teachers','fees','attendance','marks','notices','calendar','stock','sales','expenses','routine','classSubjects','ageRanges','feeStructure','activeSession','receipts','idCardLayout','studentFollowUps','attentionSettings','academicHistory','syllabus','teacherAbsent','periodTimings','settings','sessions','substituteAssignments','examRegisterMarks','marksSourceLog','marksSubmissionDeadline','govRecords','govSubmissionHistory','govActivityLog','govAgeRules','transferCertificates','workloadThresholds','dismissal','dismissalSettings'];
 
 let _sbClient=null, _sbUser=null, _sbChannel=null, _sbPushTimers={}, _sbBusy=false;
 const _sbOrigin='dev_'+Math.random().toString(36).slice(2)+'_'+Date.now();
@@ -9634,6 +9901,7 @@ create policy "public can read marks sheets" on storage.objects for select
       </details>
     `:!connected?`
       <div class="text-sm text-muted" style="margin-bottom:10px">Configuration saved. Sign in with the Supabase user you created to connect this device.</div>
+      <div class="text-xs text-muted" style="margin-bottom:10px;background:#eef2ff;border-radius:8px;padding:8px 10px">💡 Tip: after connecting here once, you can also just sign in on the Principal login screen using this same email + password — it will open the ERP <em>and</em> connect Cloud Sync in one step, on any device.</div>
       <div class="form-row">
         <div class="form-group"><label>Email</label><input id="csEmail" type="email" value="${esc(savedEmail)}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
         <div class="form-group"><label>Password</label><input id="csPass" type="password" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
@@ -9974,7 +10242,7 @@ function addClassSubject(){
 function editClassSubject(cls,idx){
   const classSubjects=ls('classSubjects')||{};
   const sub=classSubjects[cls][idx];
-  const teachers=ls('teachers')||[];
+  const teachers=getTeachingStaff();
   openModal(`Edit Subject — ${cls}`,`
   <div class="form-group"><label>Subject Name</label><input id="esName" value="${esc(sub.name)}"></div>
   <div class="form-group"><label>Assign Teacher</label>
@@ -10090,7 +10358,7 @@ function deleteSession(year){
 
 
 function openTeacherAbsentPanel(){
-  const teachers = ls('teachers')||[];
+  const teachers = getTeachingStaff();
   if(!teachers.length){ toast('No teachers added yet. Add teachers first.','error'); return; }
   openModal('Mark Teacher Absent',`
   <div class="alert alert-warning" style="margin-bottom:12px"><i class="fas fa-info-circle"></i>
@@ -10141,7 +10409,7 @@ function checkSubstituteConflict(substituteName,day,pi,dateKey,excludeAssignment
 
 // Every free (non-busy, non-absent, non-double-booked) teacher for a given day/period.
 function getAvailableTeachersForSlot(day,pi,dateKey,excludeTeacherName){
-  const teachers=ls('teachers')||[];
+  const teachers=getTeachingStaff();
   return teachers.filter(t=>t.name!==excludeTeacherName && !checkSubstituteConflict(t.name,day,pi,dateKey,null));
 }
 
@@ -10419,7 +10687,7 @@ function loadSyllabus(){
 function openAddSyllabus(editKey){
   const syllabus=ls('syllabus')||{};
   const e=editKey?syllabus[editKey]:{};
-  const teachers=ls('teachers')||[];
+  const teachers=getTeachingStaff();
   openModal(editKey?'Edit Syllabus':'Add Syllabus',`
   <div class="form-row three">
     <div class="form-group"><label>Class *</label>
@@ -12087,6 +12355,1168 @@ function getEffectiveTeacherAssignments(teacher){
   return merged;
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+//  STAFF → TEACHER DASHBOARD  (Principal-facing workload overview)
+//  Built entirely from EXISTING data — teacher records, Class Routine,
+//  Teacher Absent log, Substitute Assignments, Exam Register Marks.
+//  No duplicate teacher / routine / attendance records are created here.
+// ═══════════════════════════════════════════════════════════════════════
+
+// Configurable weekly-period bands (Low/Normal/High/Very High) — a small
+// settings modal launched from the dashboard itself, same pattern as the
+// existing "Thresholds" button on Students Need Attention.
+function getWorkloadThresholds(){
+  return Object.assign({normalMin:16, highMin:23, veryHighMin:28}, ls('workloadThresholds')||{});
+}
+function saveWorkloadThresholds(){
+  const normalMin=parseInt(document.getElementById('wtNormal')?.value)||16;
+  const highMin=parseInt(document.getElementById('wtHigh')?.value)||23;
+  const veryHighMin=parseInt(document.getElementById('wtVeryHigh')?.value)||28;
+  ss('workloadThresholds',{normalMin,highMin,veryHighMin});
+  toast('✅ Workload thresholds saved!');
+  closeModal();
+  loadTeacherWorkloadTable();
+}
+function openWorkloadThresholdsModal(){
+  const t=getWorkloadThresholds();
+  openModal('Workload Thresholds',`
+    <div class="text-sm text-muted" style="margin-bottom:12px">Weekly-period cut-offs used to label each teacher's workload. This is an administrative indicator only — it never makes pay or employment decisions automatically.</div>
+    <div class="form-group"><label>LOW: 0 up to (Normal − 1) periods/week — automatic</label></div>
+    <div class="form-group"><label>NORMAL starts at (periods/week)</label><input type="number" id="wtNormal" value="${t.normalMin}" min="1" style="width:100%;padding:9px;border:2px solid var(--border);border-radius:8px"></div>
+    <div class="form-group"><label>HIGH starts at (periods/week)</label><input type="number" id="wtHigh" value="${t.highMin}" min="1" style="width:100%;padding:9px;border:2px solid var(--border);border-radius:8px"></div>
+    <div class="form-group"><label>VERY HIGH starts at (periods/week)</label><input type="number" id="wtVeryHigh" value="${t.veryHighMin}" min="1" style="width:100%;padding:9px;border:2px solid var(--border);border-radius:8px"></div>
+  `,[
+    {label:'Save',cls:'btn-primary',onclick:'saveWorkloadThresholds()'},
+    {label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}
+  ]);
+}
+function getWorkloadStatus(periodsPerWeek){
+  const t=getWorkloadThresholds();
+  if(periodsPerWeek>=t.veryHighMin) return {label:'VERY HIGH',color:'#dc2626',bg:'#fee2e2'};
+  if(periodsPerWeek>=t.highMin)     return {label:'HIGH',color:'#b45309',bg:'#fef3c7'};
+  if(periodsPerWeek>=t.normalMin)   return {label:'NORMAL',color:'#15803d',bg:'#dcfce7'};
+  return {label:'LOW',color:'#475569',bg:'#f1f5f9'};
+}
+function _periodMinutes(pi){
+  const p=getPeriodTimings()[pi];
+  if(!p||!p.start||!p.end) return 0;
+  const [sh,sm]=p.start.split(':').map(Number), [eh,em]=p.end.split(':').map(Number);
+  return Math.max(0,(eh*60+em)-(sh*60+sm));
+}
+function fmtHoursMinutes(mins){
+  const h=Math.floor(mins/60), m=Math.round(mins%60);
+  return h>0?`${h}h ${m}m`:`${m}m`;
+}
+// Furthest-along exam term (as used by Teacher Marks Entry / Exam Register,
+// i.e. examRegisterMarks, keyed '1'/'2'/'3') that already has any data —
+// used only to decide which term's pending marks to summarise here.
+function getActiveExamTermGlobal(){
+  const marks=ls('examRegisterMarks')||{};
+  const TERMS=['1','2','3'];
+  let active='1';
+  TERMS.forEach(tm=>{ if(Object.values(marks).some(sm=>Object.keys(sm[tm]||{}).length>0)) active=tm; });
+  return active;
+}
+function examTermLabel(term){ return term==='2'?'Term 2':term==='3'?'Term 3 (Annual)':'Term 1'; }
+
+// ── SINGLE SOURCE OF TRUTH for one teacher's workload. Every card, table
+// row, chart, print sheet and profile on this dashboard reads from here —
+// calculated live from Class Routine + Teacher Absent log + Substitute
+// Assignments, never manually entered, so it can never go out of sync
+// with the routine itself (edit/delete a routine cell → this updates).
+function computeTeacherWorkload(teacher){
+  const routine=ls('routine')||{};
+  const classes=getAllClasses();
+  const dayCounts={}, dayMinutes={}; ROUTINE_DAYS.forEach(d=>{dayCounts[d]=0; dayMinutes[d]=0;});
+  let periodsWeek=0, weeklyMinutes=0;
+  const subjectSet=new Set(), classSet=new Set();
+  ROUTINE_DAYS.forEach(day=>{
+    for(let pi=0;pi<5;pi++){
+      let taught=false;
+      classes.forEach(cls=>{
+        const cell=((routine[cls]||{})[day]||{})[pi];
+        if(cell && cell.teacher===teacher.name){
+          taught=true; subjectSet.add(cell.subject||''); classSet.add(cls);
+        }
+      });
+      if(taught){ periodsWeek++; dayCounts[day]++; weeklyMinutes+=_periodMinutes(pi); dayMinutes[day]+=_periodMinutes(pi); }
+    }
+  });
+
+  const day=CURRENT_ROUTINE_DAY;
+  const schoolDayToday = !!(typeof isSchoolDay==='function' && isSchoolDay() && day);
+  const periodsToday = schoolDayToday ? (dayCounts[day]||0) : 0;
+  const freePeriodsToday = schoolDayToday ? Math.max(0,5-periodsToday) : 0;
+
+  const subToday = (typeof getSubstituteAssignments==='function')
+    ? getSubstituteAssignments().filter(a=>a.date===today() && a.substituteTeacherName===teacher.name && a.status!=='Cancelled')
+    : [];
+  const absentToday = schoolDayToday && typeof isTeacherAbsentOn==='function' && isTeacherAbsentOn(teacher.name,today(),day);
+
+  return {
+    classes:[...classSet], subjects:[...subjectSet].filter(Boolean),
+    periodsToday, periodsWeek, weeklyMinutes,
+    freePeriodsToday, subPeriodsToday:subToday.length,
+    absentToday, dayCounts, dayMinutes, status:getWorkloadStatus(periodsWeek)
+  };
+}
+
+// How many times each weekday (Mon–Sat) falls within a given calendar month.
+// There's no holiday-calendar module elsewhere in the ERP, so this counts
+// calendar weekdays only — it doesn't subtract school holidays/closures.
+function getMonthWeekdayOccurrences(year,month){ // month: 0-indexed (JS Date convention)
+  const counts={}; ROUTINE_DAYS.forEach(d=>counts[d]=0);
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  for(let d=1; d<=daysInMonth; d++){
+    const jsDay=new Date(year,month,d).getDay(); // 0=Sun..6=Sat
+    const name=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][jsDay];
+    if(counts[name]!==undefined) counts[name]++;
+  }
+  return counts;
+}
+
+// Monthly extension of computeTeacherWorkload — projects the SAME weekly
+// routine forward across every occurrence of each weekday in the chosen
+// month. Since Class Routine is a fixed weekly template (not date-specific)
+// and the ERP has no holiday calendar, this is a calendar projection, not
+// an attendance-adjusted total — it will slightly overcount if the school
+// was closed on some of those weekdays (e.g. Puja vacation).
+function computeTeacherMonthlyWorkload(teacher, year, month, weekly){
+  const w = weekly || computeTeacherWorkload(teacher);
+  const occ = getMonthWeekdayOccurrences(year, month);
+  let periodsMonth=0, minutesMonth=0, freePeriodsMonth=0, schoolDaysInMonth=0;
+  ROUTINE_DAYS.forEach(day=>{
+    const n=occ[day]||0;
+    periodsMonth += (w.dayCounts[day]||0) * n;
+    minutesMonth += (w.dayMinutes[day]||0) * n;
+    // "Free periods" only counted against the 5-period Mon–Fri school day
+    // (matches how Today's free periods are already calculated elsewhere)
+    if(day!=='Saturday' && day!=='Sunday'){
+      freePeriodsMonth += Math.max(0,5-(w.dayCounts[day]||0)) * n;
+      schoolDaysInMonth += n;
+    }
+  });
+  return { periodsMonth, minutesMonth, freePeriodsMonth, schoolDaysInMonth };
+}
+
+// Pending/completed marks-entry count for one teacher, from the same
+// routine-derived assignments used everywhere else in the app.
+function getTeacherMarksSummary(teacher){
+  const term=getActiveExamTermGlobal();
+  const assignments=getEffectiveTeacherAssignments(teacher);
+  let pending=0, completed=0; const pendingList=[];
+  assignments.forEach(a=>{
+    const subs=getSubjects(a.class, term);
+    const sub=subs.find(sb=>sb.label===a.subject);
+    if(!sub) return;
+    const st=tmMarksStatus(a.class, term, sub.key, sub.hasOral);
+    if(st.total===0) return;
+    if(st.level==='green') completed++;
+    else { pending++; pendingList.push({cls:a.class,subject:a.subject,entered:st.entered,total:st.total}); }
+  });
+  return {term:examTermLabel(term), pending, completed, pendingList};
+}
+
+function renderTeacherWorkloadDashboard(){
+  const teachers=getTeachingStaff().sort((a,b)=>a.name.localeCompare(b.name));
+  const day=CURRENT_ROUTINE_DAY;
+  const schoolDayToday = typeof isSchoolDay==='function' && isSchoolDay() && day;
+
+  const rows=teachers.map(t=>({t,w:computeTeacherWorkload(t)}));
+  const presentToday = rows.filter(r=>!r.w.absentToday).length;
+  const absentToday   = rows.filter(r=>r.w.absentToday).length;
+  const periodsToday  = rows.reduce((a,r)=>a+r.w.periodsToday,0);
+  const periodsWeekAll= rows.reduce((a,r)=>a+r.w.periodsWeek,0);
+  const avgPerTeacher = teachers.length ? Math.round(periodsWeekAll/teachers.length) : 0;
+  const highestWorkload = rows.length ? rows.reduce((a,r)=>r.w.periodsWeek>a.w.periodsWeek?r:a,rows[0]) : null;
+  const mostFreeToday   = schoolDayToday && rows.length ? rows.reduce((a,r)=>r.w.freePeriodsToday>a.w.freePeriodsToday?r:a,rows[0]) : null;
+  const subDutiesToday  = rows.reduce((a,r)=>a+r.w.subPeriodsToday,0);
+  // Today's total teaching minutes across the whole school (sum of each period's duration × how many teachers hold it)
+  let totalTeachingMinutesToday=0;
+  if(schoolDayToday){
+    for(let pi=0;pi<5;pi++){
+      const teachersThisPeriod = rows.filter(r=>{
+        const routine=ls('routine')||{};
+        return getAllClasses().some(cls=>{ const cell=((routine[cls]||{})[day]||{})[pi]; return cell&&cell.teacher===r.t.name; });
+      }).length;
+      totalTeachingMinutesToday += teachersThisPeriod * _periodMinutes(pi);
+    }
+  }
+  let pendingTasksTotal=0;
+  rows.forEach(r=>{ pendingTasksTotal += getTeacherMarksSummary(r.t).pending; });
+
+  return `
+  <div class="section-header">
+    <div class="section-title"><i class="fas fa-chart-bar" style="color:var(--gold)"></i> Teacher Dashboard</div>
+    <div class="flex gap-8 flex-wrap no-print">
+      <button class="btn btn-outline btn-sm" onclick="openWorkloadThresholdsModal()"><i class="fas fa-sliders-h"></i> Thresholds</button>
+      <button class="btn btn-outline btn-sm" onclick="exportTeacherWorkloadCSV()"><i class="fas fa-file-csv"></i> Export CSV</button>
+      <button class="btn btn-outline btn-sm" onclick="printTeacherWorkloadDaily()"><i class="fas fa-print"></i> Print Daily</button>
+      <button class="btn btn-primary btn-sm" onclick="printTeacherWorkloadWeekly()"><i class="fas fa-print"></i> Print Weekly</button>
+    </div>
+  </div>
+
+  <div class="stats-grid" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-chalkboard-teacher"></i></div>
+      <div class="stat-info"><div class="stat-label">Total Teachers</div><div class="stat-value">${teachers.length}</div></div></div>
+    <div class="stat-card success"><div class="stat-icon green"><i class="fas fa-user-check"></i></div>
+      <div class="stat-info"><div class="stat-label">Present Today</div><div class="stat-value">${presentToday}</div></div></div>
+    <div class="stat-card ${absentToday?'danger':''}"><div class="stat-icon red"><i class="fas fa-user-slash"></i></div>
+      <div class="stat-info"><div class="stat-label">Absent Today</div><div class="stat-value">${absentToday}</div></div></div>
+    <div class="stat-card"><div class="stat-icon gold"><i class="fas fa-clock"></i></div>
+      <div class="stat-info"><div class="stat-label">Periods Today</div><div class="stat-value">${schoolDayToday?periodsToday:'—'}</div><div class="stat-sub">${schoolDayToday?fmtHoursMinutes(totalTeachingMinutesToday)+' teaching time':'No school today'}</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-calendar-week"></i></div>
+      <div class="stat-info"><div class="stat-label">Periods This Week</div><div class="stat-value">${periodsWeekAll}</div></div></div>
+    <div class="stat-card"><div class="stat-icon gold"><i class="fas fa-balance-scale"></i></div>
+      <div class="stat-info"><div class="stat-label">Avg Periods/Teacher</div><div class="stat-value">${avgPerTeacher}</div><div class="stat-sub">per week</div></div></div>
+    <div class="stat-card"><div class="stat-icon red"><i class="fas fa-exchange-alt"></i></div>
+      <div class="stat-info"><div class="stat-label">Substitute Duties Today</div><div class="stat-value">${schoolDayToday?subDutiesToday:'—'}</div></div></div>
+    <div class="stat-card ${pendingTasksTotal?'danger':'success'}" onclick="showPage('teacherMarks')"><div class="stat-icon ${pendingTasksTotal?'red':'green'}"><i class="fas fa-tasks"></i></div>
+      <div class="stat-info"><div class="stat-label">Pending Academic Tasks</div><div class="stat-value">${pendingTasksTotal}</div><div class="stat-sub">marks entry, ${examTermLabel(getActiveExamTermGlobal())}</div></div></div>
+  </div>
+
+  ${highestWorkload||mostFreeToday?`
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:16px">
+    ${highestWorkload?`<div class="card" style="padding:12px 16px;border-left:4px solid #dc2626;cursor:pointer" onclick="openTeacherWorkloadProfile('${highestWorkload.t.id}')">
+      <div class="text-xs text-muted">🔺 Highest Workload</div>
+      <div style="font-weight:900;font-size:14px;color:#1a3a6b">${esc(highestWorkload.t.name)}</div>
+      <div class="text-sm">${highestWorkload.w.periodsWeek} periods/week &bull; ${highestWorkload.w.status.label}</div>
+    </div>`:''}
+    ${mostFreeToday?`<div class="card" style="padding:12px 16px;border-left:4px solid #16a34a;cursor:pointer" onclick="openTeacherWorkloadProfile('${mostFreeToday.t.id}')">
+      <div class="text-xs text-muted">🟢 Most Free Periods Today</div>
+      <div style="font-weight:900;font-size:14px;color:#1a3a6b">${esc(mostFreeToday.t.name)}</div>
+      <div class="text-sm">${mostFreeToday.w.freePeriodsToday} free period(s) today</div>
+    </div>`:''}
+  </div>`:''}
+
+  <div class="tabs no-print" style="margin-bottom:14px">
+    <button class="tab active" id="twTabOverview" onclick="switchTeacherWorkloadView('overview',this)">📋 Workload Table</button>
+    <button class="tab" id="twTabClass" onclick="switchTeacherWorkloadView('classwise',this)">🏫 Class-wise</button>
+    <button class="tab" id="twTabSubject" onclick="switchTeacherWorkloadView('subjectwise',this)">📖 Subject-wise</button>
+    <button class="tab" id="twTabCharts" onclick="switchTeacherWorkloadView('charts',this)">📊 Charts</button>
+  </div>
+
+  <div id="twViewOverview">
+    <div class="card no-print" style="margin-bottom:12px;padding:12px 14px;display:flex;gap:12px;flex-wrap:wrap;align-items:end">
+      <div style="flex:2;min-width:220px">
+        <label style="font-size:12px;font-weight:800;color:#1a3a6b;display:block;margin-bottom:4px">Search</label>
+        <input type="text" id="twSearch" placeholder="Search teacher by name / ID / phone…" oninput="filterTeacherWorkloadTable()" style="width:100%;padding:9px 12px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+      </div>
+      <div style="flex:1;min-width:170px">
+        <label style="font-size:12px;font-weight:800;color:#1a3a6b;display:block;margin-bottom:4px">Month (for monthly totals)</label>
+        <input type="month" id="twMonthSel" value="${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}" onchange="loadTeacherWorkloadTable()" style="width:100%;padding:9px 12px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+      </div>
+    </div>
+    <div class="text-xs text-muted no-print" style="margin:-4px 0 10px 2px">📅 Monthly figures project the current weekly routine across the selected month's calendar weekdays — there's no holiday calendar in the ERP yet, so school closures/vacations aren't subtracted.</div>
+    <div class="card" style="overflow-x:auto;padding:0">
+      <table id="twTable" style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:1400px">
+        <thead><tr style="background:linear-gradient(135deg,#1a3a6b,#1e4db7)">
+          <th style="padding:9px 8px;color:#fff;text-align:left">Teacher</th>
+          <th style="padding:9px 8px;color:#fff;text-align:left">ID</th>
+          <th style="padding:9px 8px;color:#fff;text-align:left">Classes</th>
+          <th style="padding:9px 8px;color:#fff;text-align:left">Subjects</th>
+          <th style="padding:9px 8px;color:#fff;text-align:center">Today</th>
+          <th style="padding:9px 8px;color:#fff;text-align:center">Week</th>
+          <th style="padding:9px 8px;color:#fff;text-align:center">Weekly Hrs</th>
+          <th style="padding:9px 8px;color:#fff;text-align:center">Free Today</th>
+          <th style="padding:9px 8px;color:#fff;text-align:center;background:rgba(201,168,76,.35)">Periods (Month)</th>
+          <th style="padding:9px 8px;color:#fff;text-align:center;background:rgba(201,168,76,.35)">Hours (Month)</th>
+          <th style="padding:9px 8px;color:#fff;text-align:center;background:rgba(201,168,76,.35)">Free (Month)</th>
+          <th style="padding:9px 8px;color:#fff;text-align:center">Substitute</th>
+          <th style="padding:9px 8px;color:#fff;text-align:center">Status Today</th>
+          <th style="padding:9px 8px;color:#fff;text-align:center">Workload</th>
+          <th style="padding:9px 8px;color:#fff;text-align:center" class="no-print">Actions</th>
+        </tr></thead>
+        <tbody id="twTableBody">${teacherWorkloadRowsHTML(rows)}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="twViewClasswise" style="display:none">${renderClassWiseTeacherView()}</div>
+  <div id="twViewSubjectwise" style="display:none">${renderSubjectWiseTeacherView()}</div>
+  <div id="twViewCharts" style="display:none">
+    <div class="dash-grid">
+      <div class="card"><div class="card-title"><i class="fas fa-chart-bar"></i> Teacher Period Distribution (Weekly)</div>
+        <div style="height:320px"><canvas id="twChartPeriods"></canvas></div></div>
+      <div class="card"><div class="card-title"><i class="fas fa-chart-bar"></i> School-wide Teaching Hours by Day</div>
+        <div style="height:320px"><canvas id="twChartDays"></canvas></div></div>
+    </div>
+  </div>
+  `;
+}
+
+function getSelectedWorkloadMonth(){
+  const val=document.getElementById('twMonthSel')?.value; // "YYYY-MM"
+  if(val && /^\d{4}-\d{2}$/.test(val)){
+    const [y,m]=val.split('-').map(Number);
+    return {year:y, month:m-1};
+  }
+  const d=new Date();
+  return {year:d.getFullYear(), month:d.getMonth()};
+}
+
+function teacherWorkloadRowsHTML(rows){
+  if(!rows.length) return `<tr><td colspan="15" style="padding:24px;text-align:center;color:#94a3b8">No teachers found. Add teachers from Staff → Teachers.</td></tr>`;
+  const {year,month}=getSelectedWorkloadMonth();
+  return rows.map(({t,w})=>{
+    const m=computeTeacherMonthlyWorkload(t,year,month,w);
+    return `
+    <tr data-search="${esc((t.name+' '+t.id+' '+(t.phone||'')).toLowerCase())}" style="border-bottom:1px solid #f0f4ff">
+      <td style="padding:8px;font-weight:800;color:#1a3a6b;cursor:pointer" onclick="openTeacherWorkloadProfile('${t.id}')">${esc(t.name)}</td>
+      <td style="padding:8px;color:#64748b">${esc(t.id)}</td>
+      <td style="padding:8px">${w.classes.length?esc(w.classes.join(', ')):'<span class="text-muted">—</span>'}</td>
+      <td style="padding:8px">${w.subjects.length?esc(w.subjects.join(', ')):'<span class="text-muted">—</span>'}</td>
+      <td style="padding:8px;text-align:center;font-weight:800">${w.periodsToday}</td>
+      <td style="padding:8px;text-align:center;font-weight:800">${w.periodsWeek}</td>
+      <td style="padding:8px;text-align:center">${fmtHoursMinutes(w.weeklyMinutes)}</td>
+      <td style="padding:8px;text-align:center">${w.freePeriodsToday}</td>
+      <td style="padding:8px;text-align:center;font-weight:800;background:#fdf9ee">${m.periodsMonth}</td>
+      <td style="padding:8px;text-align:center;background:#fdf9ee">${fmtHoursMinutes(m.minutesMonth)}</td>
+      <td style="padding:8px;text-align:center;background:#fdf9ee">${m.freePeriodsMonth}</td>
+      <td style="padding:8px;text-align:center">${w.subPeriodsToday||'—'}</td>
+      <td style="padding:8px;text-align:center">${w.absentToday?'<span class="badge badge-danger">🔴 Absent</span>':'<span class="badge badge-success">🟢 Present</span>'}</td>
+      <td style="padding:8px;text-align:center"><span class="badge" style="background:${w.status.bg};color:${w.status.color}">${w.status.label}</span></td>
+      <td style="padding:8px;text-align:center" class="no-print">
+        <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
+          <button class="btn btn-xs btn-outline" title="View Profile" onclick="openTeacherWorkloadProfile('${t.id}')"><i class="fas fa-user"></i></button>
+          ${t.phone?`<a class="btn btn-xs btn-outline" title="Call" href="tel:${esc(t.phone)}"><i class="fas fa-phone"></i></a>
+          <button class="btn btn-xs btn-success" title="WhatsApp" onclick="teacherWorkloadWhatsApp('${t.id}')"><i class="fab fa-whatsapp"></i></button>`:''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function loadTeacherWorkloadTable(){
+  const teachers=getTeachingStaff().sort((a,b)=>a.name.localeCompare(b.name));
+  const rows=teachers.map(t=>({t,w:computeTeacherWorkload(t)}));
+  const body=document.getElementById('twTableBody');
+  if(body) body.innerHTML=teacherWorkloadRowsHTML(rows);
+  filterTeacherWorkloadTable();
+}
+function filterTeacherWorkloadTable(){
+  const q=(document.getElementById('twSearch')?.value||'').toLowerCase().trim();
+  document.querySelectorAll('#twTableBody tr').forEach(tr=>{
+    const s=tr.getAttribute('data-search')||'';
+    tr.style.display = (!q || s.includes(q)) ? '' : 'none';
+  });
+}
+
+function switchTeacherWorkloadView(view,btn){
+  document.getElementById('twViewOverview').style.display = view==='overview'?'':'none';
+  document.getElementById('twViewClasswise').style.display = view==='classwise'?'':'none';
+  document.getElementById('twViewSubjectwise').style.display = view==='subjectwise'?'':'none';
+  document.getElementById('twViewCharts').style.display = view==='charts'?'':'none';
+  document.querySelectorAll('.tabs .tab').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  if(view==='charts') setTimeout(()=>{ if(typeof initTeacherWorkloadCharts==='function') initTeacherWorkloadCharts(); }, 60);
+}
+
+// ── Class-wise: Class → Subject → Teacher → periods/week ──
+function renderClassWiseTeacherView(){
+  const routine=ls('routine')||{};
+  const classes=getAllClasses();
+  return `<div class="card" style="overflow-x:auto">
+    ${classes.map(cls=>{
+      const combos={};
+      ROUTINE_DAYS.forEach(day=>{
+        for(let pi=0;pi<5;pi++){
+          const cell=((routine[cls]||{})[day]||{})[pi];
+          if(cell&&cell.subject&&cell.teacher){
+            const key=cell.subject+'|||'+cell.teacher;
+            combos[key]=(combos[key]||0)+1;
+          }
+        }
+      });
+      const entries=Object.entries(combos);
+      if(!entries.length) return '';
+      return `<div style="margin-bottom:18px">
+        <div style="font-weight:900;color:#1a3a6b;font-size:14px;margin-bottom:6px">${esc(cls)}</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:6px">
+          <thead><tr style="background:#f0f4ff"><th style="padding:6px 8px;text-align:left">Subject</th><th style="padding:6px 8px;text-align:left">Teacher</th><th style="padding:6px 8px;text-align:center">Periods/Week</th></tr></thead>
+          <tbody>${entries.sort((a,b)=>a[0].localeCompare(b[0])).map(([key,cnt])=>{
+            const [subject,teacher]=key.split('|||');
+            return `<tr style="border-bottom:1px solid #f0f4ff"><td style="padding:6px 8px">${esc(subject)}</td><td style="padding:6px 8px">${esc(teacher)}</td><td style="padding:6px 8px;text-align:center;font-weight:700">${cnt}</td></tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>`;
+    }).join('')||emptyState('🏫','No routine set yet','Set up Class Routine to see this view')}
+  </div>`;
+}
+
+// ── Subject-wise: pick a subject → which teachers teach it, in which classes ──
+function renderSubjectWiseTeacherView(){
+  const routine=ls('routine')||{};
+  const classes=getAllClasses();
+  const subjectSet=new Set();
+  classes.forEach(cls=>ROUTINE_DAYS.forEach(day=>{ for(let pi=0;pi<5;pi++){ const c=((routine[cls]||{})[day]||{})[pi]; if(c&&c.subject) subjectSet.add(c.subject); } }));
+  const subjects=[...subjectSet].sort();
+  return `
+  <div class="card no-print" style="margin-bottom:12px">
+    <div class="form-group" style="margin:0"><label>Subject</label>
+      <select id="twSubjectFilter" onchange="loadSubjectWiseTeacherView()" style="width:100%;padding:9px 12px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px">
+        <option value="">Select a subject…</option>
+        ${subjects.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}
+      </select>
+    </div>
+  </div>
+  <div id="twSubjectResult"></div>`;
+}
+function loadSubjectWiseTeacherView(){
+  const subject=document.getElementById('twSubjectFilter')?.value;
+  const box=document.getElementById('twSubjectResult');
+  if(!box) return;
+  if(!subject){ box.innerHTML=''; return; }
+  const routine=ls('routine')||{};
+  const classes=getAllClasses();
+  const byTeacher={};
+  classes.forEach(cls=>ROUTINE_DAYS.forEach(day=>{
+    for(let pi=0;pi<5;pi++){
+      const cell=((routine[cls]||{})[day]||{})[pi];
+      if(cell&&cell.subject===subject&&cell.teacher){
+        byTeacher[cell.teacher]=byTeacher[cell.teacher]||{classes:new Set(),periods:0};
+        byTeacher[cell.teacher].classes.add(cls);
+        byTeacher[cell.teacher].periods++;
+      }
+    }
+  }));
+  const entries=Object.entries(byTeacher);
+  box.innerHTML=`<div class="card">${entries.length?entries.map(([tname,d])=>`
+    <div style="padding:10px 12px;background:#f8faff;border-radius:8px;margin-bottom:8px">
+      <div style="font-weight:900;color:#1a3a6b">${esc(tname)}</div>
+      <div class="text-sm text-muted">${[...d.classes].join(', ')}</div>
+      <div class="text-sm" style="margin-top:2px">Total ${d.periods} period(s)/week</div>
+    </div>`).join(''):emptyState('📖','No teacher assigned to this subject yet','Set it up in Class Routine')}</div>`;
+}
+
+// ── Charts ──
+function initTeacherWorkloadCharts(){
+  if(typeof Chart==='undefined') return;
+  const teachers=getTeachingStaff().sort((a,b)=>a.name.localeCompare(b.name));
+  const rows=teachers.map(t=>({t,w:computeTeacherWorkload(t)}));
+
+  const c1=document.getElementById('twChartPeriods');
+  if(c1){
+    if(window._twChartPeriods) window._twChartPeriods.destroy();
+    window._twChartPeriods=new Chart(c1,{type:'bar',data:{
+      labels:rows.map(r=>r.t.name),
+      datasets:[{label:'Periods/Week',data:rows.map(r=>r.w.periodsWeek),backgroundColor:'#1a3a6b'}]
+    },options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
+  }
+  const c2=document.getElementById('twChartDays');
+  if(c2){
+    if(window._twChartDays) window._twChartDays.destroy();
+    const dayTotals=ROUTINE_DAYS.map(day=>{
+      let mins=0;
+      const routine=ls('routine')||{};
+      const classes=getAllClasses();
+      for(let pi=0;pi<5;pi++){
+        const teachersThisPeriod=teachers.filter(t=>classes.some(cls=>{ const c=((routine[cls]||{})[day]||{})[pi]; return c&&c.teacher===t.name; })).length;
+        mins += teachersThisPeriod*_periodMinutes(pi);
+      }
+      return Math.round(mins/60*10)/10;
+    });
+    window._twChartDays=new Chart(c2,{type:'bar',data:{
+      labels:ROUTINE_DAYS,
+      datasets:[{label:'Teaching Hours (school-wide)',data:dayTotals,backgroundColor:'#c9a84c'}]
+    },options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
+  }
+}
+
+// ── CSV export ──
+function exportTeacherWorkloadCSV(){
+  const teachers=getTeachingStaff().sort((a,b)=>a.name.localeCompare(b.name));
+  const {year,month}=getSelectedWorkloadMonth();
+  const monthLabel=new Date(year,month,1).toLocaleDateString('en-IN',{month:'long',year:'numeric'});
+  const rows=[['Teacher','ID','Classes','Subjects','Periods Today','Periods This Week','Weekly Hours',
+    `Periods (${monthLabel})`,`Hours (${monthLabel})`,`Free Periods (${monthLabel})`,
+    'Free Periods Today','Substitute Periods Today','Status Today','Workload']];
+  teachers.forEach(t=>{
+    const w=computeTeacherWorkload(t);
+    const m=computeTeacherMonthlyWorkload(t,year,month,w);
+    rows.push([t.name,t.id,w.classes.join('; '),w.subjects.join('; '),w.periodsToday,w.periodsWeek,fmtHoursMinutes(w.weeklyMinutes),
+      m.periodsMonth,fmtHoursMinutes(m.minutesMonth),m.freePeriodsMonth,
+      w.freePeriodsToday,w.subPeriodsToday,w.absentToday?'Absent':'Present',w.status.label]);
+  });
+  const csv=rows.map(r=>r.map(c=>{const v=String(c===null||c===undefined?'':c);return/[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\r\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=`teacher-workload-${year}-${String(month+1).padStart(2,'0')}.csv`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Print: Daily & Weekly workload summaries ──
+function printTeacherWorkloadDaily(){
+  const teachers=getTeachingStaff().sort((a,b)=>a.name.localeCompare(b.name));
+  const day=CURRENT_ROUTINE_DAY;
+  const schoolDayToday = typeof isSchoolDay==='function' && isSchoolDay() && day;
+  const rows=teachers.map(t=>({t,w:computeTeacherWorkload(t)}));
+  const body=`
+    ${schoolHeaderHTML(`Daily Teacher Workload — ${schoolDayToday?day:'No School Today'}, ${new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})}`)}
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:14px">
+      <thead><tr><th>Teacher</th><th>ID</th><th>Periods Today</th><th>Free Periods</th><th>Substitute Duties</th><th>Status</th></tr></thead>
+      <tbody>${rows.map(({t,w})=>`<tr><td>${esc(t.name)}</td><td>${esc(t.id)}</td><td>${w.periodsToday}</td><td>${w.freePeriodsToday}</td><td>${w.subPeriodsToday||'—'}</td><td>${w.absentToday?'Absent':'Present'}</td></tr>`).join('')}</tbody>
+    </table>`;
+  printWindow('Daily Teacher Workload', body);
+}
+function printTeacherWorkloadWeekly(){
+  const teachers=getTeachingStaff().sort((a,b)=>a.name.localeCompare(b.name));
+  const rows=teachers.map(t=>({t,w:computeTeacherWorkload(t)}));
+  const body=`
+    ${schoolHeaderHTML(`Weekly Teacher Workload — Session ${getActiveSession()}`)}
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:14px">
+      <thead><tr><th>Teacher</th><th>ID</th><th>Classes</th><th>Subjects</th><th>Periods/Week</th><th>Weekly Hours</th><th>Workload</th></tr></thead>
+      <tbody>${rows.map(({t,w})=>`<tr><td>${esc(t.name)}</td><td>${esc(t.id)}</td><td>${esc(w.classes.join(', '))}</td><td>${esc(w.subjects.join(', '))}</td><td>${w.periodsWeek}</td><td>${fmtHoursMinutes(w.weeklyMinutes)}</td><td>${w.status.label}</td></tr>`).join('')}</tbody>
+    </table>`;
+  printWindow('Weekly Teacher Workload', body);
+}
+
+// ── Teacher Profile (modal) ──
+function openTeacherWorkloadProfile(teacherId){
+  const teachers=ls('teachers')||[];
+  const t=teachers.find(x=>x.id===teacherId);
+  if(!t){ toast('Teacher not found','error'); return; }
+  const w=computeTeacherWorkload(t);
+  const {year,month}=getSelectedWorkloadMonth();
+  const mw=computeTeacherMonthlyWorkload(t,year,month,w);
+  const monthLabel=new Date(year,month,1).toLocaleDateString('en-IN',{month:'long',year:'numeric'});
+  const marksSummary=getTeacherMarksSummary(t);
+  const day=CURRENT_ROUTINE_DAY;
+  const schoolDayToday = typeof isSchoolDay==='function' && isSchoolDay() && day;
+
+  // Today's schedule for this teacher (all 5 periods, marking FREE where applicable)
+  const routine=ls('routine')||{};
+  const classes=getAllClasses();
+  let todayRows='';
+  if(schoolDayToday){
+    for(let pi=0;pi<5;pi++){
+      let found=null;
+      classes.forEach(cls=>{ const cell=((routine[cls]||{})[day]||{})[pi]; if(cell&&cell.teacher===t.name) found={cls,subject:cell.subject||''}; });
+      const absentKey=`${t.name}_${day}_${pi}`;
+      const isAbsentThisPeriod = found && ((ls('teacherAbsent')||{})[today()]||{})[absentKey]?.absent;
+      const label = found ? `${esc(found.cls)} — ${esc(found.subject)}` : `<span style="color:#94a3b8">FREE PERIOD</span>`;
+      const color = isAbsentThisPeriod ? '#fee2e2' : found ? '#eff6ff' : '#f8fafc';
+      const dot = isAbsentThisPeriod ? '🔴' : found ? '🔵' : '⚪';
+      todayRows+=`<div style="display:flex;justify-content:space-between;padding:8px 10px;background:${color};border-radius:8px;margin-bottom:6px;font-size:12.5px">
+        <span style="font-weight:700">${dot} P${pi+1} &bull; ${periodTimeLabel(pi)}</span><span>${label}</span></div>`;
+    }
+  } else {
+    todayRows=`<div class="text-muted text-sm">No school today</div>`;
+  }
+
+  const tabId='twp_'+t.id;
+  openModal(`👤 ${esc(t.name)}`, `
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">
+      <div style="flex:1;min-width:220px">
+        <div class="text-xs text-muted">Teacher ID</div><div style="font-weight:800">${esc(t.id)}</div>
+        <div class="text-xs text-muted" style="margin-top:8px">Phone</div><div style="font-weight:800">${esc(t.phone||'—')}</div>
+        <div class="text-xs text-muted" style="margin-top:8px">Login Username</div><div style="font-weight:800">${esc(t.username||'—')}</div>
+        <div class="text-xs text-muted" style="margin-top:8px">Designation</div><div style="font-weight:800">${esc(t.designation||'Teacher')}</div>
+      </div>
+      <div style="flex:1;min-width:220px">
+        <div class="text-xs text-muted">Assigned Classes</div><div style="font-weight:800">${w.classes.length?esc(w.classes.join(', ')):'—'}</div>
+        <div class="text-xs text-muted" style="margin-top:8px">Assigned Subjects</div><div style="font-weight:800">${w.subjects.length?esc(w.subjects.join(', ')):'—'}</div>
+        <div class="text-xs text-muted" style="margin-top:8px">Workload</div><span class="badge" style="background:${w.status.bg};color:${w.status.color}">${w.status.label} — ${w.periodsWeek} periods/week</span>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">
+      <div style="padding:10px;background:#fdf9ee;border-radius:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#8a6d1f">${mw.periodsMonth}</div><div class="text-xs text-muted">Periods (${esc(monthLabel)})</div></div>
+      <div style="padding:10px;background:#fdf9ee;border-radius:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#8a6d1f">${fmtHoursMinutes(mw.minutesMonth)}</div><div class="text-xs text-muted">Working Hours (${esc(monthLabel)})</div></div>
+      <div style="padding:10px;background:#fdf9ee;border-radius:8px;text-align:center"><div style="font-size:18px;font-weight:900;color:#8a6d1f">${mw.freePeriodsMonth}</div><div class="text-xs text-muted">Free Periods (${esc(monthLabel)})</div></div>
+    </div>
+    ${w.status.label==='HIGH'||w.status.label==='VERY HIGH'?`<div class="text-sm" style="background:#fef3c7;color:#92400e;padding:8px 10px;border-radius:8px;margin-bottom:10px">⚠️ Teacher has a higher-than-average weekly teaching load.</div>`:''}
+    ${w.status.label==='LOW'?`<div class="text-sm" style="background:#f1f5f9;color:#475569;padding:8px 10px;border-radius:8px;margin-bottom:10px">ℹ️ Teacher has several available periods.</div>`:''}
+
+    <div class="tabs" style="margin-bottom:10px">
+      <button class="tab active" onclick="switchTwpTab('${tabId}','today',this)">Today</button>
+      <button class="tab" onclick="switchTwpTab('${tabId}','weekly',this)">Weekly Routine</button>
+      <button class="tab" onclick="switchTwpTab('${tabId}','academic',this)">Academic</button>
+      <button class="tab" onclick="switchTwpTab('${tabId}','substitute',this)">Substitute History</button>
+    </div>
+    <div id="${tabId}_today">${todayRows}</div>
+    <div id="${tabId}_weekly" style="display:none">${renderTeacherGridHTML(t.name)}</div>
+    <div id="${tabId}_academic" style="display:none">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+        <div style="flex:1;min-width:140px;padding:10px;background:#dcfce7;border-radius:8px;text-align:center"><div style="font-size:20px;font-weight:900;color:#15803d">${marksSummary.completed}</div><div class="text-xs text-muted">Marks Completed</div></div>
+        <div style="flex:1;min-width:140px;padding:10px;background:${marksSummary.pending?'#fee2e2':'#f1f5f9'};border-radius:8px;text-align:center"><div style="font-size:20px;font-weight:900;color:${marksSummary.pending?'#dc2626':'#64748b'}">${marksSummary.pending}</div><div class="text-xs text-muted">Marks Pending (${esc(marksSummary.term)})</div></div>
+      </div>
+      ${marksSummary.pendingList.length?marksSummary.pendingList.map(p=>`
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#fff7ed;border-radius:8px;margin-bottom:6px;font-size:12.5px">
+          <span><strong>${esc(p.cls)}</strong> — ${esc(p.subject)} (${p.entered}/${p.total} entered)</span>
+          <button class="btn btn-xs btn-success" onclick="tmSendReminder('${t.id}','${esc(p.cls)}','${esc(p.subject)}')"><i class="fab fa-whatsapp"></i> Remind</button>
+        </div>`).join(''):'<div class="text-muted text-sm">✅ No pending marks entry</div>'}
+    </div>
+    <div id="${tabId}_substitute" style="display:none">${renderSubstituteHistoryList('','',t.name)}</div>
+  `,[
+    {label:'<i class="fas fa-print"></i> Print Profile',cls:'btn-outline',onclick:`printTeacherWorkloadProfile('${t.id}')`},
+    {label:'<i class="fas fa-table"></i> Full Routine',cls:'btn-outline',onclick:`closeModal();showPage('routine');setTimeout(()=>{if(typeof switchRoutineView==='function')switchRoutineView('teacher');setTimeout(()=>{const sel=document.getElementById('trTeacherSel');if(sel){sel.value='${t.id}';if(typeof loadTeacherRoutineView==='function')loadTeacherRoutineView();}},60);},150)`},
+    {label:'Close',cls:'btn-primary',onclick:'closeModal()'}
+  ],'modal-lg');
+}
+function switchTwpTab(tabId,view,btn){
+  ['today','weekly','academic','substitute'].forEach(v=>{
+    const el=document.getElementById(tabId+'_'+v);
+    if(el) el.style.display = v===view?'':'none';
+  });
+  btn.closest('.tabs')?.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+}
+function printTeacherWorkloadProfile(teacherId){
+  const teachers=ls('teachers')||[];
+  const t=teachers.find(x=>x.id===teacherId);
+  if(!t) return;
+  const w=computeTeacherWorkload(t);
+  const {year,month}=getSelectedWorkloadMonth();
+  const mw=computeTeacherMonthlyWorkload(t,year,month,w);
+  const monthLabel=new Date(year,month,1).toLocaleDateString('en-IN',{month:'long',year:'numeric'});
+  const marksSummary=getTeacherMarksSummary(t);
+  const body=`
+    ${schoolHeaderHTML(`Teacher Profile — ${esc(t.name)}`)}
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin:14px 0">
+      <tr><td style="padding:4px 8px;font-weight:700">Teacher ID</td><td style="padding:4px 8px">${esc(t.id)}</td>
+          <td style="padding:4px 8px;font-weight:700">Phone</td><td style="padding:4px 8px">${esc(t.phone||'—')}</td></tr>
+      <tr><td style="padding:4px 8px;font-weight:700">Classes</td><td style="padding:4px 8px">${esc(w.classes.join(', ')||'—')}</td>
+          <td style="padding:4px 8px;font-weight:700">Subjects</td><td style="padding:4px 8px">${esc(w.subjects.join(', ')||'—')}</td></tr>
+      <tr><td style="padding:4px 8px;font-weight:700">Periods/Week</td><td style="padding:4px 8px">${w.periodsWeek}</td>
+          <td style="padding:4px 8px;font-weight:700">Weekly Hours</td><td style="padding:4px 8px">${fmtHoursMinutes(w.weeklyMinutes)}</td></tr>
+      <tr><td style="padding:4px 8px;font-weight:700">Periods (${esc(monthLabel)})</td><td style="padding:4px 8px">${mw.periodsMonth}</td>
+          <td style="padding:4px 8px;font-weight:700">Working Hours (${esc(monthLabel)})</td><td style="padding:4px 8px">${fmtHoursMinutes(mw.minutesMonth)}</td></tr>
+      <tr><td style="padding:4px 8px;font-weight:700">Free Periods (${esc(monthLabel)})</td><td style="padding:4px 8px">${mw.freePeriodsMonth}</td>
+          <td style="padding:4px 8px;font-weight:700">Workload</td><td style="padding:4px 8px">${w.status.label}</td></tr>
+      <tr><td style="padding:4px 8px;font-weight:700">Marks Pending</td><td style="padding:4px 8px" colspan="3">${marksSummary.pending} (${esc(marksSummary.term)})</td></tr>
+    </table>
+    <div style="font-weight:800;margin-bottom:6px">Weekly Routine</div>
+    ${renderTeacherGridHTML(t.name)}
+    <div class="signatures" style="margin-top:30px">
+      <div class="sig-box"><div class="sig-line"></div>Teacher</div>
+      <div class="sig-box"><div class="sig-line"></div>Principal</div>
+    </div>`;
+  printWindow('Teacher Profile', body);
+}
+
+
+function teacherWorkloadWhatsApp(teacherId){
+  const t=(ls('teachers')||[]).find(x=>x.id===teacherId);
+  if(!t||!t.phone){ toast('No phone number for this teacher','error'); return; }
+  const marksSummary=getTeacherMarksSummary(t);
+  let msg=`Dear Teacher,\n\nThis is a message from Children's Paradise School.\n\n`;
+  if(marksSummary.pending>0){
+    msg+=`Your marks entry is still pending for:\n${marksSummary.pendingList.map(p=>`• ${p.cls} — ${p.subject}`).join('\n')}\n\nPlease complete it at the earliest.\n\n`;
+  } else {
+    msg+=`This is a general reminder from the school office.\n\n`;
+  }
+  msg+=`Thank you.`;
+  window.open(`https://wa.me/91${t.phone}?text=${encodeURIComponent(msg)}`,'_blank');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  🎒 STUDENT DISMISSAL / END-OF-SCHOOL HANDOVER
+//  Built on the existing Students/Teachers/Session/Cloud-Sync architecture.
+//  No new auth system, no duplicate phone/guardian database — reuses
+//  s.fatherName / s.motherName / s.phone already on the Student record.
+//  Data shape: ls('dismissal') = { [dateKey]: { [studentId]: record } }
+//  A missing record for a student today means WAITING — nothing is ever
+//  auto-marked handed over, and yesterday's dates are never touched again,
+//  so full history is kept for free by date-keying (items 5, 27, 28).
+// ═══════════════════════════════════════════════════════════════════════
+const DISMISSAL_STATUS_META={
+  WAITING:       {label:'STILL IN SCHOOL', short:'⏳ Waiting',   color:'#b45309', bg:'#fef3c7'},
+  HANDED_OVER:   {label:'HANDED OVER',      short:'🟢 Handed Over', color:'#15803d', bg:'#dcfce7'},
+  OFFICE_HANDOVER:{label:'OFFICE HANDOVER', short:'🔵 Office Handover', color:'#1d4ed8', bg:'#dbeafe'}
+};
+function getDismissalDay(dateKey){ return (ls('dismissal')||{})[dateKey||today()]||{}; }
+function getDismissalRecord(studentId,dateKey){ return getDismissalDay(dateKey)[studentId]||null; }
+function getDismissalStatus(studentId,dateKey){ const r=getDismissalRecord(studentId,dateKey); return r?r.status:'WAITING'; }
+function saveDismissalRecord(studentId,dateKey,patch){
+  const all=ls('dismissal')||{};
+  const day=all[dateKey]||{};
+  const existing=day[studentId]||{};
+  const nowIso=new Date().toISOString();
+  day[studentId]={...existing,...patch,studentId,dismissalId:dateKey+'_'+studentId,date:dateKey,updatedAt:nowIso,createdAt:existing.createdAt||nowIso};
+  all[dateKey]=day;
+  ss('dismissal',all);
+}
+function dismissalNowLabel(){
+  const d=new Date();
+  return d.toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit',hour12:true});
+}
+function getDismissalSettings(){ return Object.assign({time:'15:00'}, ls('dismissalSettings')||{}); }
+function openDismissalSettingsModal(){
+  const s=getDismissalSettings();
+  openModal('Dismissal Settings',`
+    <div class="text-sm text-muted" style="margin-bottom:12px">Used only for the "students still in school past dismissal time" alert.</div>
+    <div class="form-group"><label>Normal Dismissal Time</label>
+      <input type="time" id="dsTime" value="${esc(s.time)}" style="width:100%;padding:9px;border:2px solid var(--border);border-radius:8px">
+    </div>
+  `,[
+    {label:'Save',cls:'btn-primary',onclick:'saveDismissalSettingsModal()'},
+    {label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}
+  ]);
+}
+function saveDismissalSettingsModal(){
+  ss('dismissalSettings',{time:document.getElementById('dsTime').value||'15:00'});
+  toast('✅ Dismissal settings saved'); closeModal();
+  if(document.getElementById('dsmOverview')) loadDismissalOverview();
+}
+
+// Per-class summary for one date — single source of truth for every card/
+// table/print sheet on both the Principal and Teacher dismissal pages.
+function getClassDismissalSummary(cls,session,dateKey){
+  const students=(ls('students')||[]).filter(s=>s.session===session&&s.class===cls);
+  const day=getDismissalDay(dateKey);
+  let handedOver=0, office=0, waiting=0;
+  students.forEach(s=>{
+    const st=(day[s.id]||{}).status||'WAITING';
+    if(st==='HANDED_OVER') handedOver++;
+    else if(st==='OFFICE_HANDOVER') office++;
+    else waiting++;
+  });
+  return {total:students.length, handedOver, office, waiting, stillIn:waiting, students};
+}
+function getSchoolDismissalSummary(session,dateKey){
+  const classes=getAllClasses();
+  let total=0,handedOver=0,office=0,waiting=0;
+  const byClass=classes.map(cls=>{
+    const c=getClassDismissalSummary(cls,session,dateKey);
+    total+=c.total; handedOver+=c.handedOver; office+=c.office; waiting+=c.waiting;
+    return {cls,...c};
+  });
+  return {total,handedOver,office,waiting,byClass};
+}
+
+// ── Confirm + record a handover (shared by teacher's classroom handover
+// and the principal's office handover — location/handledBy differ) ──
+function confirmDismissalHandover(studentId,location){
+  const s=(ls('students')||[]).find(x=>x.id===studentId);
+  if(!s){ toast('Student not found','error'); return; }
+  const isOffice=location==='School Office';
+  openModal(isOffice?'Confirm Office Handover':'Confirm Handover',`
+    <div style="text-align:center;padding:6px 0 14px">
+      <div style="font-weight:900;font-size:17px;color:#1a3a6b">${esc(s.name)}</div>
+      <div class="text-sm text-muted">Class ${esc(s.class)} &bull; Roll ${s.roll||'—'}</div>
+    </div>
+    <div style="background:#f8faff;border-radius:10px;padding:12px 14px;margin-bottom:14px">
+      <div class="text-xs text-muted">Parent / Guardian</div>
+      <div style="font-weight:800">${esc(s.fatherName||s.motherName||'—')}</div>
+      ${s.phone?`<div class="text-xs text-muted" style="margin-top:6px">Phone</div><div style="font-weight:700">${esc(s.phone)}</div>`:''}
+    </div>
+    <div class="text-sm">${isOffice?'Confirm that this student is being handed over to the parent/guardian from the <strong>school office</strong>?':'Confirm student handover to parent/guardian?'}</div>
+  `,[
+    {label:isOffice?'🔵 Confirm Office Handover':'✓ Confirm Handover',cls:'btn-primary',onclick:`doDismissalHandover('${studentId}','${location}')`},
+    {label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}
+  ]);
+}
+function doDismissalHandover(studentId,location){
+  const s=(ls('students')||[]).find(x=>x.id===studentId);
+  if(!s){ closeModal(); return; }
+  const isOffice=location==='School Office';
+  const classTeacherMap=getClassTeacherMap();
+  saveDismissalRecord(studentId,today(),{
+    status:isOffice?'OFFICE_HANDOVER':'HANDED_OVER',
+    time:dismissalNowLabel(),
+    class:s.class, roll:s.roll, session:s.session, studentName:s.name,
+    parentName:s.fatherName||s.motherName||'', parentPhone:s.phone||'',
+    teacherId:currentUser.teacherId||currentUser.id, teacherName:currentUser.name,
+    handledBy:currentUser.name, handoverLocation:location,
+    originalClassTeacher: isOffice ? (classTeacherMap[s.class]||'') : undefined
+  });
+  closeModal();
+  toast(isOffice?'🔵 Office handover recorded':'🟢 Marked as handed over');
+  if(document.getElementById('myDismissalList')) loadMyDismissalList();
+  if(document.getElementById('dsmOverview')) loadDismissalOverview();
+  if(document.getElementById('officeSearchResult')) searchOfficeHandover();
+}
+function undoDismissal(studentId){
+  const rec=getDismissalRecord(studentId,today());
+  if(!rec){ toast('Nothing to undo','error'); return; }
+  if(rec.status==='OFFICE_HANDOVER' && currentUser.role!=='principal'){
+    toast('Only the Principal can reverse an office handover','error'); return;
+  }
+  if(rec.status==='HANDED_OVER' && currentUser.role==='teacher' && rec.teacherId!==(currentUser.teacherId||currentUser.id)){
+    toast('You can only undo your own handover entries','error'); return;
+  }
+  if(!confirm('Are you sure you want to reverse this handover? The student will show as Still in School again.')) return;
+  const all=ls('dismissal')||{};
+  const day=all[today()]||{};
+  delete day[studentId];
+  all[today()]=day;
+  ss('dismissal',all);
+  toast('↩️ Handover reversed');
+  if(document.getElementById('myDismissalList')) loadMyDismissalList();
+  if(document.getElementById('dsmOverview')) loadDismissalOverview();
+  if(document.getElementById('officeSearchResult')) searchOfficeHandover();
+}
+function dismissalWhatsApp(studentId){
+  const s=(ls('students')||[]).find(x=>x.id===studentId);
+  if(!s||!s.phone){ toast('Parent phone number not available','error'); return; }
+  const msg=`Dear Parent,\n\nYour child ${s.name}, Class ${s.class}, has not yet been collected from school today.\n\nPlease contact/collect your child from the school office as soon as possible.\n\nChildren's Paradise School\nUttar Radhanagar, Magrahat`;
+  window.open(`https://wa.me/91${s.phone}?text=${encodeURIComponent(msg)}`,'_blank');
+}
+
+// ═══════════════ TEACHER: MY CLASS DISMISSAL ═══════════════
+function renderMyDismissal(){
+  const t=loggedInTeacherRecord();
+  if(!t || !(t.classes||[]).length) return emptyState('👤','No class assigned','Ask the Principal to assign a class to your teacher record');
+  const classes=t.classes;
+  window._myDismissalClass = window._myDismissalClass && classes.includes(window._myDismissalClass) ? window._myDismissalClass : classes[0];
+  return `
+  <div class="section-header">
+    <div class="section-title"><i class="fas fa-school" style="color:var(--gold)"></i> My Class Dismissal</div>
+  </div>
+  ${classes.length>1?`
+  <div class="card no-print" style="margin-bottom:12px;padding:10px 14px">
+    <label style="font-size:12px;font-weight:800;color:#1a3a6b">Class</label>
+    <select id="myDismissalClassSel" onchange="window._myDismissalClass=this.value;loadMyDismissalList()" style="width:100%;padding:9px;border:2px solid var(--border);border-radius:8px;margin-top:4px">
+      ${classes.map(c=>`<option value="${esc(c)}" ${c===window._myDismissalClass?'selected':''}>${esc(c)}</option>`).join('')}
+    </select>
+  </div>`:''}
+  <div class="card no-print" style="margin-bottom:12px;padding:12px 14px">
+    <input type="text" id="myDismissalSearch" placeholder="🔍 Search by name / roll…" oninput="filterMyDismissalList()" style="width:100%;padding:11px 14px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:15px">
+  </div>
+  <div id="myDismissalSummary" style="margin-bottom:14px"></div>
+  <div id="myDismissalList"></div>
+  `;
+}
+function loadMyDismissalList(){
+  const cls=window._myDismissalClass;
+  const t=loggedInTeacherRecord();
+  if(!cls||!t) return;
+  const session=getActiveSession();
+  const sum=getClassDismissalSummary(cls,session,today());
+  const pct=sum.total?Math.round((sum.handedOver+sum.office)/sum.total*100):0;
+  const summaryBox=document.getElementById('myDismissalSummary');
+  if(summaryBox) summaryBox.innerHTML=`
+    <div class="card" style="padding:14px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:900;font-size:15px;color:#1a3a6b">${esc(cls)} — Today's Dismissal</div>
+        <div class="text-sm text-muted">${sum.handedOver+sum.office} / ${sum.total} handed over</div>
+      </div>
+      <div style="background:#f1f5f9;border-radius:20px;height:14px;overflow:hidden">
+        <div style="background:linear-gradient(90deg,#15803d,#22c55e);height:100%;width:${pct}%;transition:width .3s"></div>
+      </div>
+      <div class="text-xs text-muted" style="margin-top:4px">${pct}% completed &bull; ${sum.waiting} still in school</div>
+    </div>`;
+  const listBox=document.getElementById('myDismissalList');
+  if(listBox) listBox.innerHTML=sum.students
+    .sort((a,b)=>(a.roll||0)-(b.roll||0))
+    .map(s=>myDismissalCardHTML(s)).join('') || emptyState('🎒','No students in this class','');
+  filterMyDismissalList();
+}
+function myDismissalCardHTML(s){
+  const rec=getDismissalRecord(s.id,today());
+  const status=rec?rec.status:'WAITING';
+  const meta=DISMISSAL_STATUS_META[status];
+  return `
+  <div class="card" data-search="${esc((s.name+' '+(s.roll||'')).toLowerCase())}" style="padding:14px 16px;margin-bottom:10px;border-left:5px solid ${meta.color}">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+      <div>
+        <div class="text-xs text-muted">Roll ${s.roll||'—'}</div>
+        <div style="font-weight:900;font-size:16px;color:#1a3a6b">${esc(s.name)}</div>
+        <div class="text-sm text-muted">${s.fatherName?'Father: '+esc(s.fatherName):(s.motherName?'Mother: '+esc(s.motherName):'')}</div>
+        ${s.phone?`<div class="text-sm text-muted">Parent Phone: ${esc(s.phone)}</div>`:'<div class="text-xs" style="color:#dc2626">⚠️ Parent phone number not available</div>'}
+      </div>
+      <span class="badge" style="background:${meta.bg};color:${meta.color};font-size:13px;padding:7px 14px">${meta.short}</span>
+    </div>
+    ${status==='WAITING'?`
+      <button class="btn btn-primary" style="width:100%;margin-top:12px;padding:14px;font-size:15px" onclick="confirmDismissalHandover('${s.id}','Classroom')">
+        <i class="fas fa-hand-holding-heart"></i> HAND OVER TO PARENT
+      </button>`:`
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:12.5px;color:#64748b">
+        <span>Time: ${rec.time||'—'} &bull; By: ${esc(rec.handledBy||'—')}</span>
+        ${status==='HANDED_OVER'&&rec.teacherId===(currentUser.teacherId||currentUser.id)?`<button class="btn btn-xs btn-outline" onclick="undoDismissal('${s.id}')">Undo</button>`:''}
+      </div>`}
+  </div>`;
+}
+function filterMyDismissalList(){
+  const q=(document.getElementById('myDismissalSearch')?.value||'').toLowerCase().trim();
+  document.querySelectorAll('#myDismissalList [data-search]').forEach(el=>{
+    el.style.display=(!q||el.getAttribute('data-search').includes(q))?'':'none';
+  });
+}
+
+// ═══════════════ PRINCIPAL: DISMISSAL DASHBOARD ═══════════════
+function renderDismissalDashboard(){
+  window._dismissalDate = window._dismissalDate || today();
+  return `
+  <div class="section-header">
+    <div class="section-title"><i class="fas fa-school" style="color:var(--gold)"></i> Student Dismissal</div>
+    <div class="flex gap-8 no-print">
+      <button class="btn btn-outline btn-sm" onclick="openDismissalSettingsModal()"><i class="fas fa-sliders-h"></i> Settings</button>
+      <button class="btn btn-outline btn-sm" onclick="printDismissalReport()"><i class="fas fa-print"></i> Print Report</button>
+      <button class="btn btn-danger btn-sm" onclick="printStillInSchool()"><i class="fas fa-print"></i> Print Still-in-School</button>
+    </div>
+  </div>
+  <div class="card no-print" style="margin-bottom:12px;padding:10px 14px;display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+    <div style="flex:1;min-width:160px"><label style="font-size:12px;font-weight:800;color:#1a3a6b;display:block;margin-bottom:4px">Date</label>
+      <input type="date" id="dsmDate" value="${window._dismissalDate}" max="${today()}" onchange="window._dismissalDate=this.value;loadDismissalOverview();loadStillInSchoolList();loadHandedOverList()" style="width:100%;padding:9px;border:2px solid var(--border);border-radius:8px"></div>
+  </div>
+  <div class="tabs no-print" style="margin-bottom:14px">
+    <button class="tab active" onclick="switchDismissalView('overview',this)">📊 Today's Dismissal</button>
+    <button class="tab" onclick="switchDismissalView('handedover',this)">✅ Handed Over</button>
+    <button class="tab" onclick="switchDismissalView('stillin',this)">🔴 Still in School</button>
+    <button class="tab" onclick="switchDismissalView('office',this)">🔵 Office Handover</button>
+    <button class="tab" onclick="switchDismissalView('history',this)">📂 History</button>
+  </div>
+  <div id="dsmOverview"></div>
+  <div id="dsmHandedOver" style="display:none"></div>
+  <div id="dsmStillIn" style="display:none"></div>
+  <div id="dsmOffice" style="display:none"></div>
+  <div id="dsmHistory" style="display:none"></div>
+  `;
+}
+function switchDismissalView(view,btn){
+  document.getElementById('dsmOverview').style.display = view==='overview'?'':'none';
+  document.getElementById('dsmHandedOver').style.display = view==='handedover'?'':'none';
+  document.getElementById('dsmStillIn').style.display = view==='stillin'?'':'none';
+  document.getElementById('dsmOffice').style.display = view==='office'?'':'none';
+  document.getElementById('dsmHistory').style.display = view==='history'?'':'none';
+  btn.closest('.tabs').querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  if(view==='overview') loadDismissalOverview();
+  if(view==='handedover') loadHandedOverList();
+  if(view==='stillin') loadStillInSchoolList();
+  if(view==='office') { const box=document.getElementById('dsmOffice'); if(box) box.innerHTML=officeHandoverSearchHTML(); }
+  if(view==='history') loadDismissalHistory();
+}
+function loadDismissalOverview(){
+  const box=document.getElementById('dsmOverview');
+  if(!box) return;
+  const dateKey=window._dismissalDate||today();
+  const session=getActiveSession();
+  const sum=getSchoolDismissalSummary(session,dateKey);
+  const pending=sum.waiting;
+  const settings=getDismissalSettings();
+  const isToday=dateKey===today();
+  let lateAlert='';
+  if(isToday && settings.time){
+    const [h,m]=settings.time.split(':').map(Number);
+    const cutoff=new Date(); cutoff.setHours(h,m,0,0);
+    if(new Date()>cutoff && pending>0){
+      lateAlert=`<div class="alert alert-warning" style="margin-bottom:14px"><i class="fas fa-exclamation-triangle"></i> ⚠️ Dismissal time was ${fmtTime(settings.time)} — ${pending} student(s) are still in school.</div>`;
+    }
+  }
+  box.innerHTML=`
+  ${lateAlert}
+  <div class="stats-grid" style="margin-bottom:16px">
+    <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-users"></i></div><div class="stat-info"><div class="stat-label">Total Students</div><div class="stat-value">${sum.total}</div></div></div>
+    <div class="stat-card success"><div class="stat-icon green"><i class="fas fa-check-circle"></i></div><div class="stat-info"><div class="stat-label">Handed Over</div><div class="stat-value">${sum.handedOver}</div></div></div>
+    <div class="stat-card"><div class="stat-icon" style="background:#dbeafe;color:#1d4ed8"><i class="fas fa-building"></i></div><div class="stat-info"><div class="stat-label">Office Handover</div><div class="stat-value">${sum.office}</div></div></div>
+    <div class="stat-card ${pending?'danger':''}"><div class="stat-icon red"><i class="fas fa-hourglass-half"></i></div><div class="stat-info"><div class="stat-label">Still in School</div><div class="stat-value">${pending}</div></div></div>
+  </div>
+  <div class="card" style="overflow-x:auto">
+    <div class="card-title" style="padding:14px 16px 0"><i class="fas fa-th-list"></i> Class-wise Summary</div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px">
+      <thead><tr style="background:#f0f4ff"><th style="padding:8px 12px;text-align:left">Class</th><th style="padding:8px 12px;text-align:center">Total</th><th style="padding:8px 12px;text-align:center">Handed Over</th><th style="padding:8px 12px;text-align:center">Office</th><th style="padding:8px 12px;text-align:center">Still in School</th><th style="padding:8px 12px">Progress</th></tr></thead>
+      <tbody>${sum.byClass.filter(c=>c.total>0).map(c=>{
+        const pct=c.total?Math.round((c.handedOver+c.office)/c.total*100):0;
+        return `<tr style="border-bottom:1px solid #f0f4ff">
+          <td style="padding:8px 12px;font-weight:800;color:#1a3a6b">${esc(c.cls)}</td>
+          <td style="padding:8px 12px;text-align:center">${c.total}</td>
+          <td style="padding:8px 12px;text-align:center;color:#15803d;font-weight:700">${c.handedOver}</td>
+          <td style="padding:8px 12px;text-align:center;color:#1d4ed8;font-weight:700">${c.office}</td>
+          <td style="padding:8px 12px;text-align:center;color:${c.waiting?'#dc2626':'#94a3b8'};font-weight:700">${c.waiting}</td>
+          <td style="padding:8px 12px"><div style="background:#f1f5f9;border-radius:20px;height:10px;overflow:hidden;min-width:100px"><div style="background:#22c55e;height:100%;width:${pct}%"></div></div></td>
+        </tr>`;}).join('')}</tbody>
+    </table>
+  </div>`;
+}
+function loadStillInSchoolList(){
+  const box=document.getElementById('dsmStillIn');
+  if(!box) return;
+  const dateKey=window._dismissalDate||today();
+  const session=getActiveSession();
+  const classes=getAllClasses();
+  let rows=[];
+  classes.forEach(cls=>{
+    getClassDismissalSummary(cls,session,dateKey).students.forEach(s=>{
+      if(getDismissalStatus(s.id,dateKey)==='WAITING') rows.push(s);
+    });
+  });
+  rows.sort((a,b)=>a.class.localeCompare(b.class)||(a.roll||0)-(b.roll||0));
+  box.innerHTML=`
+  <div class="card" style="padding:14px 16px;margin-bottom:12px;background:${rows.length?'#fef2f2':'#f0fdf4'}">
+    <div style="font-weight:900;font-size:15px;color:${rows.length?'#991b1b':'#15803d'}">${rows.length?`🔴 ${rows.length} Students Still in School`:'✅ All students handed over'}</div>
+  </div>
+  ${rows.map((s,i)=>`
+    <div class="card" style="padding:12px 16px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+      <div>
+        <div style="font-weight:800;color:#1a3a6b">${i+1}. ${esc(s.name)} <span class="text-xs text-muted">— ${esc(s.class)}, Roll ${s.roll||'—'}</span></div>
+        <div class="text-sm text-muted">${s.fatherName?'Father: '+esc(s.fatherName):''} ${s.phone?'&bull; '+esc(s.phone):'⚠️ No phone on file'}</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${s.phone?`<button class="btn btn-sm btn-success" onclick="dismissalWhatsApp('${s.id}')"><i class="fab fa-whatsapp"></i> WhatsApp Parent</button>`:''}
+        <button class="btn btn-sm btn-primary" onclick="confirmDismissalHandover('${s.id}','School Office')"><i class="fas fa-building"></i> Office Handover</button>
+      </div>
+    </div>`).join('')}`;
+}
+
+// "Handed Over" tab — lets the Principal look up exactly what time a
+// student left (and with whom), for when a parent calls asking. Covers
+// both classroom hand-overs and office hand-overs, searchable, most
+// recent first.
+function loadHandedOverList(){
+  const box=document.getElementById('dsmHandedOver');
+  if(!box) return;
+  const dateKey=window._dismissalDate||today();
+  const session=getActiveSession();
+  const classes=getAllClasses();
+  let rows=[];
+  classes.forEach(cls=>{
+    getClassDismissalSummary(cls,session,dateKey).students.forEach(s=>{
+      const rec=getDismissalRecord(s.id,dateKey);
+      if(rec && (rec.status==='HANDED_OVER'||rec.status==='OFFICE_HANDOVER')) rows.push({s,rec});
+    });
+  });
+  rows.sort((a,b)=>(b.rec.updatedAt||'').localeCompare(a.rec.updatedAt||'')); // most recent first
+  box.innerHTML=`
+  <div class="card no-print" style="margin-bottom:12px;padding:12px 14px">
+    <input type="text" id="handedOverSearch" placeholder="🔍 Search by student name / roll / class — to check what time they left" oninput="filterHandedOverList()" style="width:100%;padding:11px 14px;border:2px solid var(--border);border-radius:8px;font-family:inherit;font-size:14px">
+  </div>
+  <div class="card" style="padding:14px 16px;margin-bottom:12px;background:#f0fdf4">
+    <div style="font-weight:900;font-size:15px;color:#15803d">✅ ${rows.length} Student${rows.length===1?'':'s'} Handed Over${dateKey===today()?' Today':' on '+fmtDate(dateKey)}</div>
+  </div>
+  <div id="handedOverList">
+  ${rows.length?rows.map(({s,rec})=>{
+    const meta=DISMISSAL_STATUS_META[rec.status];
+    return `
+    <div class="card" data-search="${esc((s.name+' '+(s.roll||'')+' '+s.class).toLowerCase())}" style="padding:12px 16px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;border-left:4px solid ${meta.color}">
+      <div>
+        <div style="font-weight:800;color:#1a3a6b">${esc(s.name)} <span class="text-xs text-muted">— ${esc(s.class)}, Roll ${s.roll||'—'}</span></div>
+        <div class="text-sm text-muted">Parent: ${esc(rec.parentName||s.fatherName||s.motherName||'—')}${rec.parentPhone?' &bull; '+esc(rec.parentPhone):''}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-weight:900;font-size:16px;color:${meta.color}">⏰ ${rec.time||'—'}</div>
+        <span class="badge" style="background:${meta.bg};color:${meta.color}">${meta.short}</span>
+        <div class="text-xs text-muted" style="margin-top:2px">By: ${esc(rec.handledBy||'—')}${rec.handoverLocation?' &bull; '+esc(rec.handoverLocation):''}</div>
+      </div>
+    </div>`;
+  }).join(''):'<div class="text-muted text-sm" style="padding:10px 4px">No students handed over yet for this date</div>'}
+  </div>`;
+}
+function filterHandedOverList(){
+  const q=(document.getElementById('handedOverSearch')?.value||'').toLowerCase().trim();
+  document.querySelectorAll('#handedOverList [data-search]').forEach(el=>{
+    el.style.display=(!q||el.getAttribute('data-search').includes(q))?'':'none';
+  });
+}
+function officeHandoverSearchHTML(){
+  return `
+  <div class="card no-print" style="margin-bottom:12px;padding:14px 16px">
+    <label style="font-size:12px;font-weight:800;color:#1a3a6b">Search Student</label>
+    <input type="text" id="officeSearchInput" placeholder="Name / Roll / Student ID / Parent Phone" oninput="searchOfficeHandover()" style="width:100%;padding:11px;border:2px solid var(--border);border-radius:8px;margin-top:4px">
+  </div>
+  <div id="officeSearchResult"></div>`;
+}
+function searchOfficeHandover(){
+  const q=(document.getElementById('officeSearchInput')?.value||'').toLowerCase().trim();
+  const box=document.getElementById('officeSearchResult');
+  if(!box) return;
+  if(!q){ box.innerHTML=''; return; }
+  const session=getActiveSession();
+  const students=(ls('students')||[]).filter(s=>s.session===session && (
+    s.name.toLowerCase().includes(q) || String(s.roll||'').includes(q) ||
+    (s.studentId||'').toLowerCase().includes(q) || (s.phone||'').includes(q)
+  )).slice(0,15);
+  box.innerHTML=students.length?students.map(s=>{
+    const status=getDismissalStatus(s.id,today());
+    const meta=DISMISSAL_STATUS_META[status];
+    return `<div class="card" style="padding:14px 16px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div>
+          <div style="font-weight:900;color:#1a3a6b">${esc(s.name)}</div>
+          <div class="text-sm text-muted">Class ${esc(s.class)} &bull; Roll ${s.roll||'—'} &bull; ID ${esc(s.studentId||'—')}</div>
+          <div class="text-sm text-muted">Parent: ${esc(s.fatherName||s.motherName||'—')} ${s.phone?'&bull; '+esc(s.phone):''}</div>
+        </div>
+        <span class="badge" style="background:${meta.bg};color:${meta.color};height:fit-content">${meta.short}</span>
+      </div>
+      ${status==='WAITING'?`<button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="confirmDismissalHandover('${s.id}','School Office')"><i class="fas fa-building"></i> GIVE STUDENT TO PARENT</button>`
+        :`<div class="text-xs text-muted" style="margin-top:8px">Already ${meta.label.toLowerCase()} at ${(getDismissalRecord(s.id,today())||{}).time||''}${status==='OFFICE_HANDOVER'&&currentUser.role==='principal'?` &bull; <a href="#" onclick="undoDismissal('${s.id}');return false" style="color:#dc2626">Undo</a>`:''}</div>`}
+    </div>`;
+  }).join(''):'<div class="text-muted text-sm">No matching student found</div>';
+}
+function loadDismissalHistory(){
+  const box=document.getElementById('dsmHistory');
+  if(!box) return;
+  const all=ls('dismissal')||{};
+  const dates=Object.keys(all).sort().reverse();
+  box.innerHTML=`
+  <div class="card no-print" style="margin-bottom:12px;padding:12px 14px;display:flex;gap:10px;flex-wrap:wrap">
+    <div style="flex:1;min-width:150px"><label style="font-size:12px;font-weight:800;color:#1a3a6b">Class</label>
+      <select id="dhClass" onchange="filterDismissalHistory()" style="width:100%;padding:9px;border:2px solid var(--border);border-radius:8px"><option value="">All Classes</option>${getAllClasses().map(c=>`<option>${esc(c)}</option>`).join('')}</select></div>
+  </div>
+  <div id="dhList">
+    ${dates.length?dates.map(d=>{
+      const day=all[d];
+      const entries=Object.values(day||{});
+      if(!entries.length) return '';
+      const ho=entries.filter(e=>e.status==='HANDED_OVER').length;
+      const off=entries.filter(e=>e.status==='OFFICE_HANDOVER').length;
+      return `<div class="card dh-row" data-date="${d}" style="padding:12px 16px;margin-bottom:8px;cursor:pointer" onclick="viewDismissalHistoryDate('${d}')">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-weight:800;color:#1a3a6b">${esc(fmtDate(d))}</div>
+          <div class="text-sm text-muted">${ho} handed over &bull; ${off} office handover</div>
+        </div>
+      </div>`;
+    }).join(''):'<div class="text-muted text-sm">No dismissal records yet</div>'}
+  </div>`;
+}
+function filterDismissalHistory(){
+  // Class filter is applied when a date is opened (viewDismissalHistoryDate); the
+  // list of dates itself isn't class-specific, so nothing to filter here yet.
+}
+function viewDismissalHistoryDate(dateKey){
+  window._dismissalDate=dateKey;
+  document.getElementById('dsmDate').value=dateKey;
+  switchDismissalView('overview', document.querySelector('.tabs .tab'));
+}
+
+// ── Print ──
+function printDismissalReport(){
+  const dateKey=window._dismissalDate||today();
+  const session=getActiveSession();
+  const classes=getAllClasses();
+  let rows=[]; let sl=1;
+  classes.forEach(cls=>{
+    getClassDismissalSummary(cls,session,dateKey).students.sort((a,b)=>(a.roll||0)-(b.roll||0)).forEach(s=>{
+      const rec=getDismissalRecord(s.id,dateKey);
+      const status=rec?rec.status:'WAITING';
+      rows.push({sl:sl++, s, rec, status});
+    });
+  });
+  const body=`
+    ${schoolHeaderHTML(`Today's Student Dismissal Report — ${fmtDate(dateKey)}`)}
+    <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:14px">
+      <thead><tr><th>Sl</th><th>Roll</th><th>Student Name</th><th>Class</th><th>Parent/Guardian</th><th>Status</th><th>Time</th><th>Handled By</th><th>Location</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr><td>${r.sl}</td><td>${r.s.roll||'—'}</td><td>${esc(r.s.name)}</td><td>${esc(r.s.class)}</td><td>${esc(r.s.fatherName||r.s.motherName||'—')}</td><td>${DISMISSAL_STATUS_META[r.status].label}</td><td>${r.rec?.time||'—'}</td><td>${esc(r.rec?.handledBy||'—')}</td><td>${esc(r.rec?.handoverLocation||'—')}</td></tr>`).join('')}</tbody>
+    </table>
+    <div class="signatures" style="margin-top:30px">
+      <div class="sig-box"><div class="sig-line"></div>Class Teacher</div>
+      <div class="sig-box"><div class="sig-line"></div>Principal</div>
+    </div>`;
+  printWindow('Dismissal Report', body);
+}
+function printStillInSchool(){
+  const dateKey=window._dismissalDate||today();
+  const session=getActiveSession();
+  const classes=getAllClasses();
+  let rows=[];
+  classes.forEach(cls=>{
+    getClassDismissalSummary(cls,session,dateKey).students.forEach(s=>{
+      if(getDismissalStatus(s.id,dateKey)==='WAITING') rows.push(s);
+    });
+  });
+  rows.sort((a,b)=>a.class.localeCompare(b.class)||(a.roll||0)-(b.roll||0));
+  const body=`
+    ${schoolHeaderHTML(`Students Still in School — ${fmtDate(dateKey)}`)}
+    <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:14px">
+      <thead><tr><th>Roll</th><th>Student Name</th><th>Class</th><th>Parent Name</th><th>Parent Phone</th><th>Teacher</th><th>Status</th></tr></thead>
+      <tbody>${rows.map(s=>`<tr><td>${s.roll||'—'}</td><td>${esc(s.name)}</td><td>${esc(s.class)}</td><td>${esc(s.fatherName||s.motherName||'—')}</td><td>${esc(s.phone||'—')}</td><td>${esc(getClassTeacherMap()[s.class]||'—')}</td><td>STILL IN SCHOOL</td></tr>`).join('')||'<tr><td colspan="7" style="text-align:center;padding:16px">All students have been handed over ✅</td></tr>'}</tbody>
+    </table>`;
+  printWindow('Students Still in School', body);
+}
+
+
 function renderTeacherMarks(){
   const teachers = ls('teachers')||[];
   return `
@@ -13073,7 +14503,7 @@ function isSchoolDay(){ return CURRENT_DAY_INDEX>=1 && CURRENT_DAY_INDEX<=5; }
 // ───────────────────────────────────────────────
 function renderAcademicSettings(){
   const classSubjects  = ls('classSubjects')||{};
-  const teachers       = ls('teachers')||[];
+  const teachers       = getTeachingStaff();
   const customClasses  = ls('customClasses')||CLASSES;
 
   return `
@@ -13759,7 +15189,7 @@ function loadTeacherRoutineView(){
   const controls = document.getElementById('trControls');
   const body = document.getElementById('trBody');
   if(!controls||!body) return;
-  const teachers = ls('teachers')||[];
+  const teachers = getTeachingStaff();
   const isTeacherRole = currentUser.role==='teacher';
   const own = isTeacherRole ? loggedInTeacherRecord() : null;
 
@@ -13838,7 +15268,7 @@ function printTeacherRoutine(teacherId){
 }
 
 function printAllTeacherRoutines(){
-  const teachers=ls('teachers')||[];
+  const teachers=getTeachingStaff();
   if(!teachers.length){ toast('No teachers to print','error'); return; }
   const w=window.open('','_blank');
   w.document.write(`<!DOCTYPE html><html><head><title>Teacher Routines — All</title>${teacherRoutinePrintStyles()}</head><body>
@@ -14347,6 +15777,7 @@ function openStudentProfile(id){
     <button class="tab" onclick="switchProfileTab('pfHistory',this)">🎓 History</button>
     <button class="tab" onclick="switchProfileTab('pfTxn',this)">💳 Transactions</button>
     <button class="tab" onclick="switchProfileTab('pfGov',this)">🏛 Government Record</button>
+    <button class="tab" onclick="switchProfileTab('pfTC',this)">📄 Transfer Certificate</button>
   </div>
   </div>
 
@@ -14383,6 +15814,41 @@ function openStudentProfile(id){
     </div>
     ${rec.remarks?`<div style="background:#f8faff;padding:9px 12px;border-radius:8px;border:1px solid var(--border);margin-top:8px"><div style="font-size:10px;color:var(--text-muted);font-weight:800;text-transform:uppercase">Remarks</div><div style="font-size:13px;font-weight:700;color:var(--primary-dark);margin-top:2px">${esc(rec.remarks)}</div></div>`:''}
     `;})()}
+  </div>
+
+  <!-- TRANSFER CERTIFICATE TAB -->
+  <div id="pfTC" style="display:none">
+    ${(()=>{
+      const history = getStudentTCs(id);
+      const active = getActiveTCForStudent(id);
+      const latest = history[0];
+      if(!history.length){
+        return `<div style="padding:20px;text-align:center;color:var(--text-muted)">
+          <div style="font-size:13px;margin-bottom:10px">No Transfer Certificate issued.</div>
+          ${currentUser.role==='principal'?`<button class="btn btn-primary btn-sm" onclick="closeModal();startNewTC('${id}')"><i class="fas fa-plus"></i> Create TC</button>`:''}
+        </div>`;
+      }
+      return `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:6px 0 10px;flex-wrap:wrap;gap:8px">
+        <div>${tcStatusBadge(latest.status)} ${latest.tcNo?`<span style="margin-left:8px;font-weight:800;color:#1a3a6b">${esc(latest.tcNo)}</span>`:''}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-sm btn-primary" onclick="closeModal();openTCFormModal('${latest.id}')"><i class="fas fa-eye"></i> View / Edit</button>
+          ${latest.status==='ISSUED'?`<button class="btn btn-sm btn-outline" onclick="printTC('${latest.id}')"><i class="fas fa-print"></i> Print</button>`:''}
+          ${!active&&currentUser.role==='principal'?`<button class="btn btn-sm btn-outline" onclick="closeModal();startNewTC('${id}')"><i class="fas fa-plus"></i> New TC</button>`:''}
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        ${[['Reason for Leaving',latest.reasonForLeaving==='Other'?(latest.reasonOther||'Other'):(latest.reasonForLeaving||'—')],['Date of Leaving',latest.dateOfLeaving?fmtDate(latest.dateOfLeaving):'—'],['Destination School',latest.destinationSchool||'—'],['Issue Date',latest.issueDate?fmtDate(latest.issueDate):'—']].map(([l,v])=>`<div style="background:#f8faff;padding:9px 12px;border-radius:8px;border:1px solid var(--border)"><div style="font-size:10px;color:var(--text-muted);font-weight:800;text-transform:uppercase">${l}</div><div style="font-size:13px;font-weight:700;color:var(--primary-dark);margin-top:2px">${esc(String(v))}</div></div>`).join('')}
+      </div>
+      ${history.length>1?`<div style="font-size:11px;font-weight:800;color:var(--text-muted);text-transform:uppercase;margin-top:14px;margin-bottom:6px">Full TC History</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${history.map(t=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#f8faff;border-radius:8px;font-size:12px">
+          <span>${esc(t.tcNo||'(no number yet)')} — ${fmtDate(t.createdAt)}</span>
+          ${tcStatusBadge(t.status)}
+        </div>`).join('')}
+      </div>`:''}
+      `;
+    })()}
   </div>
 
   <!-- FEE TAB -->
@@ -15466,20 +16932,13 @@ function generateDueReport(){
   const session=getActiveSession();
   let students=(ls('students')||[]).filter(s=>s.session===session);
   if(cls)students=students.filter(s=>s.class===cls);
-  const fees=ls('fees')||{}; const cm=currMonth(); let rows=[];
+  let rows=[];
   students.forEach(s=>{
-    const sf=fees[s.id]||{};
-    const admPaid=sf.admissionPaid||0;
-    const admTotal=getEffectiveFee(s.id,'admission',s.class);
-    const mAmt=getEffectiveFee(s.id,'monthly',s.class);
-    let admDue=0,monthlyDue=0,examDue=0,overdueAmt=0;
-    if(!type||type==='Admission')if(admPaid<admTotal)admDue=admTotal-admPaid;
-    if(!type||type==='Monthly'){
-      for(let m=0;m<=cm;m++){const mf=(sf.monthly||{})[m];if(!mf||!mf.paid){monthlyDue+=mAmt;if(cm-m>=3)overdueAmt+=mAmt;}}
-    }
-    if(!type||type==='Exam'){
-      [['Term 1','exam1'],['Term 2','exam2'],['Term 3','exam3']].forEach(([t,key])=>{const ef=(sf.exam||{})[t];if(!ef?.paid)examDue+=getEffectiveFee(s.id,key,s.class);});
-    }
+    const t=computeStudentFeeTotals(s);
+    const admDue     = (!type||type==='Admission') ? t.admDue : 0;
+    const monthlyDue = (!type||type==='Monthly')   ? t.monthlyDueAmt : 0;
+    const examDue     = (!type||type==='Exam')      ? t.examDueAmt : 0;
+    const overdueAmt = (!type||type==='Monthly')   ? t.overdueAmt : 0;
     const totalDue=admDue+monthlyDue+examDue;
     if(totalDue>0&&(!overdueOnly||overdueAmt>0))rows.push({s,admDue,monthlyDue,examDue,overdueAmt,totalDue});
   });
@@ -15743,7 +17202,7 @@ const MAGRAHAT_II_PANCHAYAT_POINTS = {
   'Magrahat Paschim':  {lat:22.2420, lng:88.3650, verified:true},  // west of Magrahat town (real centre)
   'Magrahat Purba':    {lat:22.2420, lng:88.3900, verified:true},  // east of Magrahat town (real centre)
   'Mohanpur':          {lat:22.2150, lng:88.3550, verified:false},
-  'Multi':             {lat:22.269141, lng:88.383779, verified:true}, // Barat Kamdebpur (school's own locality) is in Multi GP
+  'Multi':             {lat:22.2828211, lng:88.4055751, verified:true}, // Multi Gram Panchayat office — exact pin from Sau's Google Maps link
   'Nainan':            {lat:22.2765, lng:88.3502, verified:true},  // Nainan census town/GP (Wikipedia)
   'Urelchandpur':      {lat:22.2350, lng:88.4150, verified:false}
 };
@@ -15923,10 +17382,595 @@ function exportPanchayatCSV(){
   URL.revokeObjectURL(url);
 }
 
+// ═══════════════════════════════════════════════════════
+//  TRANSFER CERTIFICATE (TC) MANAGEMENT
+//  Purely additive module — reads existing student/fee/government data,
+//  never modifies it except setting student.enrollmentStatus to
+//  'transferred' when a TC is actually issued (and back to 'active' if
+//  that TC is later cancelled). No student record is ever deleted.
+// ═══════════════════════════════════════════════════════
+const TC_STATUS_META={
+  REQUESTED:         {label:'TC Requested',        icon:'🟡', badge:'badge-warning'},
+  UNDER_PREPARATION: {label:'Under Preparation',    icon:'🔵', badge:'badge-info'},
+  ISSUED:            {label:'TC Issued',            icon:'🟢', badge:'badge-success'},
+  CANCELLED:         {label:'TC Cancelled',          icon:'🔴', badge:'badge-danger'}
+};
+const TC_REASON_OPTIONS=['Transfer to another school','Family relocation','Personal reason','Parent request','Completed schooling','Other'];
+function tcStatusBadge(status){
+  const m=TC_STATUS_META[status]||TC_STATUS_META.REQUESTED;
+  return `<span class="badge ${m.badge}" style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap"><span>${m.icon}</span>${m.label}</span>`;
+}
+function getTCs(){ return ls('transferCertificates')||[]; }
+function saveTCs(arr){ ss('transferCertificates', arr); }
+function getTCById(id){ return getTCs().find(t=>t.id===id); }
+function getStudentTCs(studentId){ return getTCs().filter(t=>t.studentId===studentId).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')); }
+function getActiveTCForStudent(studentId){
+  // A draft still in progress (not yet issued/cancelled), if one exists
+  return getTCs().find(t=>t.studentId===studentId && (t.status==='REQUESTED'||t.status==='UNDER_PREPARATION'));
+}
+// TC/YYYY/NNN — never duplicated, sequential per calendar year
+function genTCNumber(){
+  const year=new Date().getFullYear();
+  const prefix=`TC/${year}/`;
+  const nums=getTCs().filter(t=>t.tcNo&&t.tcNo.startsWith(prefix)).map(t=>parseInt(t.tcNo.slice(prefix.length))||0);
+  const next=(nums.length?Math.max(...nums):0)+1;
+  return prefix+String(next).padStart(3,'0');
+}
+// Full fee clearance snapshot for a student — admission + 12 months + 3 exam terms, using the same
+// getEffectiveFee logic the rest of the ERP already uses, so numbers always match Fee Collection.
+function computeFeeClearance(studentId, cls){
+  const fees=ls('fees')||{}; const sf=fees[studentId]||{};
+  const admTotal=getEffectiveFee(studentId,'admission',cls);
+  const admPaid=sf.admissionPaid||0;
+  const mAmt=getEffectiveFee(studentId,'monthly',cls);
+  const monthsPaid=Object.values(sf.monthly||{}).filter(x=>x.paid).length;
+  const monthsDue=12-monthsPaid;
+  const monthlyTotal=12*mAmt;
+  const monthlyPaidAmt=monthsPaid*mAmt;
+  const examFeeKeys={'Term 1':'exam1','Term 2':'exam2','Term 3':'exam3'};
+  let examTotal=0, examPaid=0;
+  Object.entries(examFeeKeys).forEach(([term,key])=>{
+    const fee=getEffectiveFee(studentId,key,cls);
+    examTotal+=fee;
+    if((sf.exam||{})[term]?.paid) examPaid+=fee;
+  });
+  const totalDue=admTotal+monthlyTotal+examTotal;
+  const totalPaid=admPaid+monthlyPaidAmt+examPaid;
+  const remaining=Math.max(0,totalDue-totalPaid);
+  const status = remaining<=0 ? 'CLEARED' : totalPaid>0 ? 'PARTIAL' : 'DUE';
+  return {totalDue,totalPaid,remaining,status,monthsDue};
+}
+function feeClearanceBadge(status){
+  if(status==='CLEARED') return '<span class="badge badge-success">🟢 Cleared</span>';
+  if(status==='PARTIAL') return '<span class="badge badge-warning">🟡 Partial / Pending</span>';
+  return '<span class="badge badge-danger">🔴 Due</span>';
+}
+
+function renderTC(){
+  const canIssue = currentUser.role==='principal';
+  const tcs = getTCs();
+  const statusFilter = window._tcStatusFilter||'';
+  const classFilter = window._tcClassFilter||'';
+  const q = (window._tcSearchQ||'').toLowerCase();
+  const students = ls('students')||[];
+  const classes = getAllClasses();
+
+  let rows = tcs.map(t=>{
+    const s = students.find(x=>x.id===t.studentId);
+    return {t, s};
+  });
+  if(statusFilter) rows = rows.filter(r=>r.t.status===statusFilter);
+  if(classFilter) rows = rows.filter(r=>r.t.presentClass===classFilter);
+  if(q) rows = rows.filter(r=>
+    (r.t.studentName||'').toLowerCase().includes(q) ||
+    (r.t.tcNo||'').toLowerCase().includes(q) ||
+    (r.t.admissionNo||'').toLowerCase().includes(q) ||
+    (r.s&&r.s.studentId||'').toLowerCase().includes(q) ||
+    (r.s&&r.s.phone||'').includes(q)
+  );
+  rows.sort((a,b)=>(b.t.createdAt||'').localeCompare(a.t.createdAt||''));
+
+  const counts = {
+    total: tcs.length,
+    requested: tcs.filter(t=>t.status==='REQUESTED').length,
+    prep: tcs.filter(t=>t.status==='UNDER_PREPARATION').length,
+    issued: tcs.filter(t=>t.status==='ISSUED').length,
+    cancelled: tcs.filter(t=>t.status==='CANCELLED').length
+  };
+
+  return `
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px">
+    <div>
+      <div style="font-size:20px;font-weight:900;color:#0d1f3c">📄 Transfer Certificate (TC)</div>
+      <div style="font-size:12px;color:#6b7a99;margin-top:2px">Generate, issue, and maintain Transfer Certificates for students leaving the school</div>
+    </div>
+    ${canIssue?`<button class="btn btn-primary" onclick="openTCStudentPicker()"><i class="fas fa-plus"></i> New TC</button>`:''}
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px">
+    <div onclick="window._tcStatusFilter='';showPage('transferCert')" style="cursor:pointer;background:${!statusFilter?'#eef2ff':'white'};border:2px solid ${!statusFilter?'#1a3a6b':'#e8eef5'};border-radius:12px;padding:12px 14px">
+      <div style="font-size:11px;font-weight:800;color:#1a3a6b">📋 TOTAL TC</div>
+      <div style="font-size:22px;font-weight:900;color:#0d1f3c;margin-top:2px">${counts.total}</div>
+    </div>
+    ${Object.entries({REQUESTED:counts.requested,UNDER_PREPARATION:counts.prep,ISSUED:counts.issued,CANCELLED:counts.cancelled}).map(([k,c])=>{
+      const m=TC_STATUS_META[k]; const active=statusFilter===k;
+      return `<div onclick="window._tcStatusFilter='${k}';showPage('transferCert')" style="cursor:pointer;background:${active?'#eef2ff':'white'};border:2px solid ${active?'#1a3a6b':'#e8eef5'};border-radius:12px;padding:12px 14px">
+        <div style="font-size:11px;font-weight:800;color:#1a3a6b">${m.icon} ${m.label.toUpperCase()}</div>
+        <div style="font-size:22px;font-weight:900;color:#0d1f3c;margin-top:2px">${c}</div>
+      </div>`;
+    }).join('')}
+  </div>
+
+  <div class="card" style="margin-bottom:14px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div class="form-group" style="margin:0;flex:1;min-width:200px"><label>🔍 Search</label>
+        <input id="tcSearchInput" value="${esc(window._tcSearchQ||'')}" placeholder="Name, TC No., Admission No., Student ID, Phone" oninput="window._tcSearchQ=this.value;loadTCListBody()" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)">
+      </div>
+      <div class="form-group" style="margin:0"><label>Class</label>
+        <select onchange="window._tcClassFilter=this.value;showPage('transferCert')" style="padding:9px;border-radius:8px;border:1.5px solid var(--border)">
+          <option value="">All Classes</option>
+          ${classes.map(c=>`<option value="${esc(c)}" ${c===classFilter?'selected':''}>${esc(c)}</option>`).join('')}
+        </select>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="printTCRegister()"><i class="fas fa-print"></i> Print Register</button>
+      <button class="btn btn-outline btn-sm" onclick="exportTCRegisterCSV()"><i class="fas fa-file-csv"></i> Export CSV</button>
+    </div>
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden">
+    <div id="tcListBody">${renderTCListRows(rows, canIssue)}</div>
+  </div>`;
+}
+
+function renderTCListRows(rows, canIssue){
+  if(!rows.length) return emptyState('📭','No Transfer Certificates found','Click "New TC" to create one, or adjust your filters');
+  return `<div style="overflow-x:auto">
+  <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+    <thead><tr style="background:#1a3a6b;color:white;text-align:left">
+      <th style="padding:9px 10px">TC No.</th><th style="padding:9px 10px">Student</th><th style="padding:9px 10px">Class</th><th style="padding:9px 10px">Date</th>
+      <th style="padding:9px 10px">Reason</th><th style="padding:9px 10px">Destination School</th><th style="padding:9px 10px">Status</th><th style="padding:9px 10px">Action</th>
+    </tr></thead>
+    <tbody>
+      ${rows.map(({t,s})=>`<tr style="border-top:1px solid #f0f4ff">
+        <td style="padding:8px 10px;font-weight:800;color:#1a3a6b">${esc(t.tcNo||'—')}</td>
+        <td style="padding:8px 10px;font-weight:700">${esc(t.studentName)}${s?'':' <span style="color:#b91c1c;font-size:10px">(record removed)</span>'}</td>
+        <td style="padding:8px 10px;color:#6b7a99">${esc(t.presentClass||'—')}</td>
+        <td style="padding:8px 10px;color:#6b7a99;white-space:nowrap">${t.issueDate?fmtDate(t.issueDate):(t.requestDate?'Req: '+fmtDate(t.requestDate):'—')}</td>
+        <td style="padding:8px 10px;color:#6b7a99">${esc(t.reasonForLeaving==='Other'?(t.reasonOther||'Other'):(t.reasonForLeaving||'—'))}</td>
+        <td style="padding:8px 10px;color:#6b7a99">${esc(t.destinationSchool||'—')}</td>
+        <td style="padding:8px 10px">${tcStatusBadge(t.status)}</td>
+        <td style="padding:8px 10px"><div style="display:flex;gap:5px;flex-wrap:nowrap">
+          <button class="btn btn-xs btn-primary" onclick="openTCFormModal('${t.id}')" title="View / Edit"><i class="fas fa-eye"></i></button>
+          ${t.status==='ISSUED'?`<button class="btn btn-xs btn-outline" onclick="printTC('${t.id}')" title="Print"><i class="fas fa-print"></i></button>
+          <button class="btn btn-xs" style="background:#22c55e;color:white;border:none" onclick="sendTCWhatsApp('${t.id}')" title="WhatsApp"><i class="fab fa-whatsapp"></i></button>`:''}
+        </div></td>
+      </tr>`).join('')}
+    </tbody>
+  </table></div>`;
+}
+function loadTCListBody(){
+  const el=document.getElementById('tcListBody');
+  if(!el) return;
+  const tcs=getTCs(); const students=ls('students')||[];
+  const statusFilter=window._tcStatusFilter||''; const classFilter=window._tcClassFilter||''; const q=(window._tcSearchQ||'').toLowerCase();
+  let rows=tcs.map(t=>({t,s:students.find(x=>x.id===t.studentId)}));
+  if(statusFilter) rows=rows.filter(r=>r.t.status===statusFilter);
+  if(classFilter) rows=rows.filter(r=>r.t.presentClass===classFilter);
+  if(q) rows=rows.filter(r=>(r.t.studentName||'').toLowerCase().includes(q)||(r.t.tcNo||'').toLowerCase().includes(q)||(r.t.admissionNo||'').toLowerCase().includes(q)||(r.s&&r.s.studentId||'').toLowerCase().includes(q)||(r.s&&r.s.phone||'').includes(q));
+  rows.sort((a,b)=>(b.t.createdAt||'').localeCompare(a.t.createdAt||''));
+  el.innerHTML=renderTCListRows(rows, currentUser.role==='principal');
+}
+// ── Search & select a student to start a new TC ──
+function openTCStudentPicker(){
+  const students=(ls('students')||[]).filter(s=>s.enrollmentStatus!=='transferred');
+  openModal('Select Student for Transfer Certificate', `
+    <input id="tcPickSearch" placeholder="Search by name, Student ID, admission no., roll, class, or phone" oninput="tcPickFilter()" style="width:100%;padding:10px;border-radius:8px;border:1.5px solid var(--border);margin-bottom:10px">
+    <div id="tcPickList" style="max-height:420px;overflow-y:auto"></div>
+  `, [{label:'Cancel', cls:'btn-outline', onclick:'closeModal()'}]);
+  window._tcPickStudents = students;
+  tcPickFilter();
+}
+function tcPickFilter(){
+  const q=(document.getElementById('tcPickSearch')?.value||'').toLowerCase();
+  const list=document.getElementById('tcPickList');
+  if(!list) return;
+  const students=window._tcPickStudents||[];
+  const filtered = q ? students.filter(s=>
+    (s.name||'').toLowerCase().includes(q) ||
+    (s.studentId||'').toLowerCase().includes(q) ||
+    (s.admissionNo||'').toLowerCase().includes(q) ||
+    String(s.roll||'').includes(q) ||
+    (s.class||'').toLowerCase().includes(q) ||
+    (s.phone||'').includes(q)
+  ) : students.slice(0,50);
+  if(!filtered.length){ list.innerHTML='<div style="padding:20px;text-align:center;color:var(--text-muted)">No students found</div>'; return; }
+  list.innerHTML = filtered.map(s=>{
+    const existingTC = getActiveTCForStudent(s.id);
+    return `<div onclick="closeModal();startNewTC('${s.id}')" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-weight:700;color:var(--primary)">${esc(s.name)}</div>
+        <div style="font-size:11px;color:var(--text-muted)">${esc(s.class)} · Roll ${s.roll||'—'} · ${esc(s.studentId||'')}</div>
+      </div>
+      ${existingTC?tcStatusBadge(existingTC.status):'<span style="font-size:11px;color:var(--text-muted)">Start TC &rarr;</span>'}
+    </div>`;
+  }).join('');
+}
+
+// ── Small number/date-to-words helper for the "DOB in Words" field (editable, just a starting suggestion) ──
+function numberToWordsSmall(n){
+  const ones=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const tens=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  if(n<20) return ones[n];
+  if(n<100) return tens[Math.floor(n/10)]+(n%10?' '+ones[n%10]:'');
+  return String(n);
+}
+function yearToWords(y){
+  if(y>=2000&&y<2100){ const rem=y-2000; return 'Two Thousand'+(rem?' '+numberToWordsSmall(rem):''); }
+  const century=Math.floor(y/100), rem=y%100;
+  return numberToWordsSmall(century)+' Hundred'+(rem?' '+numberToWordsSmall(rem):'');
+}
+function dobToWords(dob){
+  const d=new Date(dob);
+  if(isNaN(d.getTime())) return '';
+  const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  return `${d.getDate()} ${months[d.getMonth()]}, ${yearToWords(d.getFullYear())}`;
+}
+
+// ── Creates a new TC draft (status REQUESTED), auto-filled from the student's existing record — nothing re-typed ──
+function startNewTC(studentId){
+  const existing = getActiveTCForStudent(studentId);
+  if(existing){ openTCFormModal(existing.id); return; }
+  const students=ls('students')||[];
+  const s=students.find(x=>x.id===studentId);
+  if(!s){ toast('Student not found','error'); return; }
+  const clearance = computeFeeClearance(studentId, s.class);
+  const govRec = getGovRecord(studentId);
+  const dob = s.dob||'';
+  const tc = {
+    id: uid(), tcNo:'', studentId, status:'REQUESTED',
+    studentIdSnap: s.studentId||'', admissionNo: s.admissionNo||'',
+    studentName: s.name||'', fatherName: s.fatherName||'', motherName: s.motherName||'',
+    dob, dobWords: dob?dobToWords(dob):'', gender: s.gender||'', nationality: s.nationality||'Indian',
+    religion: s.religion||'', category: s.category||'', motherTongue: s.motherTongue||'', address: s.address||'',
+    admissionDate: s.admissionDate||s.createdAt||'', classAtAdmission: s.class||'', lastClassStudied: s.class||'',
+    lastSession: s.session||'', presentClass: s.class||'', presentSection: s.section||'', roll: s.roll||'', medium: s.medium||'',
+    dateOfLeaving: today(), reasonForLeaving:'', reasonOther:'', lastExamPassed:'', result:'', totalAttendance:'', conduct:'Good',
+    feesPaid: clearance.totalPaid, feeStatus: clearance.status, feeClearanceVerified:false,
+    schoolLeavingStatus:'', remarks:'', banglarShikshaId: govRec.banglarShikshaId||'',
+    tcRequired:'Yes', destinationSchool:'', destinationAddress:'', destinationUdise:'',
+    requestDate: today(), requestedBy: currentUser.name,
+    issueDate:'', issuedBy:'', cancelledDate:'', cancelledBy:'', cancelReason:'',
+    createdAt: new Date().toISOString(), createdBy: currentUser.name,
+    updatedAt: new Date().toISOString(), updatedBy: currentUser.name
+  };
+  const tcs=getTCs(); tcs.push(tc); saveTCs(tcs);
+  openTCFormModal(tc.id);
+}
+
+// ── The main TC edit form — organized into sections matching the certificate itself ──
+const TC_FIELD_SCHEMA = [
+  {section:'B', key:'studentName', label:'Student Name', type:'text'},
+  {section:'B', key:'fatherName', label:"Father's Name", type:'text'},
+  {section:'B', key:'motherName', label:"Mother's Name", type:'text'},
+  {section:'B', key:'dob', label:'Date of Birth', type:'date'},
+  {section:'B', key:'dobWords', label:'Date of Birth in Words', type:'text'},
+  {section:'B', key:'gender', label:'Gender', type:'text'},
+  {section:'B', key:'nationality', label:'Nationality', type:'text'},
+  {section:'B', key:'religion', label:'Religion', type:'text'},
+  {section:'B', key:'category', label:'Category', type:'text'},
+  {section:'B', key:'motherTongue', label:'Mother Tongue', type:'text'},
+  {section:'B', key:'address', label:'Address', type:'textarea'},
+  {section:'C', key:'admissionDate', label:'Date of Admission', type:'date'},
+  {section:'C', key:'classAtAdmission', label:'Class at Admission', type:'text'},
+  {section:'C', key:'lastClassStudied', label:'Last Class Studied', type:'text'},
+  {section:'C', key:'lastSession', label:'Last Session', type:'text'},
+  {section:'C', key:'presentClass', label:'Present Class', type:'text'},
+  {section:'C', key:'presentSection', label:'Present Section', type:'text'},
+  {section:'C', key:'roll', label:'Roll Number', type:'text'},
+  {section:'C', key:'medium', label:'Medium', type:'text'},
+  {section:'C', key:'lastExamPassed', label:'Last Examination Passed', type:'text'},
+  {section:'C', key:'result', label:'Result', type:'text'},
+  {section:'C', key:'totalAttendance', label:'Total Attendance / Working Days', type:'text'},
+  {section:'C', key:'conduct', label:'Conduct / Character', type:'text'},
+  {section:'D', key:'dateOfLeaving', label:'Date of Leaving School', type:'date'},
+  {section:'D', key:'reasonForLeaving', label:'Reason for Leaving', type:'select', options:TC_REASON_OPTIONS},
+  {section:'D', key:'reasonOther', label:'If Other, specify', type:'text'},
+  {section:'D', key:'schoolLeavingStatus', label:'School Leaving Status', type:'text'},
+  {section:'D', key:'remarks', label:'Remarks', type:'textarea'},
+  {section:'F', key:'tcRequired', label:'TC Required', type:'select', options:['Yes','No']},
+  {section:'F', key:'destinationSchool', label:'Destination School', type:'text'},
+  {section:'F', key:'destinationAddress', label:'Destination School Address', type:'textarea'},
+  {section:'F', key:'destinationUdise', label:'Destination School UDISE Code (optional)', type:'text'},
+  {section:'F', key:'banglarShikshaId', label:'Government / Banglar Shiksha ID', type:'text'}
+];
+function tcFieldId(key){ return 'tcf'+key.charAt(0).toUpperCase()+key.slice(1); }
+function renderTCField(f, val, locked){
+  const id=tcFieldId(f.key);
+  const dis = locked ? 'disabled' : '';
+  let control='';
+  if(f.type==='select'){
+    control=`<select id="${id}" ${dis} style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)">
+      <option value="">Select</option>
+      ${f.options.map(o=>`<option ${o===val?'selected':''}>${esc(o)}</option>`).join('')}
+    </select>`;
+  } else if(f.type==='textarea'){
+    control=`<textarea id="${id}" rows="2" ${dis} style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)">${esc(val||'')}</textarea>`;
+  } else if(f.type==='date'){
+    control=`<input id="${id}" type="date" value="${esc(val||'')}" ${dis} style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)">`;
+  } else {
+    control=`<input id="${id}" value="${esc(val||'')}" ${dis} style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)">`;
+  }
+  return `<div class="form-group"><label>${esc(f.label)}</label>${control}</div>`;
+}
+function renderTCSection(sectionKey, heading, tc, locked){
+  const fields=TC_FIELD_SCHEMA.filter(f=>f.section===sectionKey);
+  return `<div style="font-size:13px;font-weight:900;color:#1a3a6b;background:#eef2ff;padding:8px 12px;border-radius:8px;margin:16px 0 10px">${heading}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${fields.map(f=>renderTCField(f,tc[f.key],locked)).join('')}</div>`;
+}
+
+function openTCFormModal(tcId){
+  const tc=getTCById(tcId);
+  if(!tc){ toast('TC record not found','error'); return; }
+  const students=ls('students')||[];
+  const s=students.find(x=>x.id===tc.studentId);
+  const clearance = computeFeeClearance(tc.studentId, tc.presentClass||(s?s.class:''));
+  const isPrincipal = currentUser.role==='principal';
+  const locked = tc.status==='ISSUED' || tc.status==='CANCELLED';
+
+  openModal(`Transfer Certificate — ${esc(tc.studentName)}`, `
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      <div>${tcStatusBadge(tc.status)} ${tc.tcNo?`<span style="margin-left:8px;font-weight:800;color:#1a3a6b">${esc(tc.tcNo)}</span>`:''}</div>
+      <div style="font-size:11px;color:var(--text-muted)">${s?`${esc(s.class)} · Roll ${s.roll} · ${esc(s.studentId||'')}`:'Student record not found'}</div>
+    </div>
+    ${locked?`<div style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#475569"><i class="fas fa-lock"></i> This TC is ${tc.status==='ISSUED'?'issued':'cancelled'} — fields are locked. ${tc.status==='ISSUED'?'Cancel it first if corrections are needed.':''}</div>`:''}
+
+    <div style="font-size:13px;font-weight:900;color:#1a3a6b;background:#eef2ff;padding:8px 12px;border-radius:8px;margin-bottom:10px">Certificate Info</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group"><label>TC / Certificate Number</label><input id="tcfTcNo" value="${esc(tc.tcNo||'')}" placeholder="Auto-generated on issue" ${locked?'disabled':''} style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)"></div>
+      <div class="form-group"><label>Admission Number</label><input id="tcfAdmissionNo" value="${esc(tc.admissionNo||'')}" ${locked?'disabled':''} style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)"></div>
+      <div class="form-group"><label>Student ID (School)</label><input value="${esc(tc.studentIdSnap||'')}" readonly style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border);background:#f1f5f9;color:#64748b"></div>
+    </div>
+
+    ${renderTCSection('B','Student Details',tc,locked)}
+    ${renderTCSection('C','Academic Details',tc,locked)}
+    ${renderTCSection('D','Leaving Details',tc,locked)}
+
+    <div style="font-size:13px;font-weight:900;color:#1a3a6b;background:#eef2ff;padding:8px 12px;border-radius:8px;margin:16px 0 10px">Fee Clearance</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px">
+      <div style="padding:10px;background:#f8faff;border-radius:10px;text-align:center"><div class="text-xs text-muted">Total Fee Due</div><div style="font-weight:900;font-size:15px;color:#1a3a6b">₹${clearance.totalDue}</div></div>
+      <div style="padding:10px;background:#f8faff;border-radius:10px;text-align:center"><div class="text-xs text-muted">Total Paid</div><div style="font-weight:900;font-size:15px;color:#15803d">₹${clearance.totalPaid}</div></div>
+      <div style="padding:10px;background:#f8faff;border-radius:10px;text-align:center"><div class="text-xs text-muted">Remaining</div><div style="font-weight:900;font-size:15px;color:${clearance.remaining>0?'#b91c1c':'#15803d'}">₹${clearance.remaining}</div></div>
+    </div>
+    <div style="margin-bottom:8px">${feeClearanceBadge(clearance.status)}</div>
+    ${clearance.remaining>0?`<div style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:8px"><i class="fas fa-exclamation-triangle"></i> Outstanding fee exists. Please verify fee clearance before issuing TC.</div>`:''}
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+      <input type="checkbox" id="tcfFeeVerified" ${tc.feeClearanceVerified?'checked':''} ${locked?'disabled':''} style="width:16px;height:16px">
+      Fee Clearance Verified (confirm before issuing, even if fee is outstanding)
+    </label>
+
+    ${renderTCSection('F','Destination School / Government Record',tc,locked)}
+
+    <div id="tcFormError" style="display:none;background:#fee2e2;color:#b91c1c;padding:10px;border-radius:8px;font-size:13px;font-weight:700;margin-top:12px"></div>
+  `, [
+    ...(locked?[]:[{label:'<i class="fas fa-save"></i> Save Changes', cls:'btn-primary', onclick:`saveTCFormFields('${tc.id}')`}]),
+    {label:'<i class="fas fa-eye"></i> Preview', cls:'btn-outline', onclick:`previewTCModal('${tc.id}')`},
+    ...(isPrincipal&&!locked?[{label:'<i class="fas fa-check-circle"></i> Issue TC', cls:'btn-gold', onclick:`issueTCConfirm('${tc.id}')`}]:[]),
+    ...(isPrincipal&&!locked?[{label:'<i class="fas fa-times-circle"></i> Cancel Request', cls:'btn-outline', onclick:`cancelTCConfirm('${tc.id}')`}]:[]),
+    ...(tc.status==='ISSUED'?[{label:'<i class="fas fa-print"></i> Print', cls:'btn-outline', onclick:`printTC('${tc.id}')`},{label:'<i class="fab fa-whatsapp"></i> WhatsApp', cls:'btn-success', onclick:`sendTCWhatsApp('${tc.id}')`}]:[]),
+    ...(isPrincipal&&tc.status==='ISSUED'?[{label:'<i class="fas fa-ban"></i> Cancel TC', cls:'btn-outline', onclick:`cancelTCConfirm('${tc.id}')`}]:[]),
+    {label:'Close', cls:'btn-outline', onclick:'closeModal()'}
+  ], 'modal-lg');
+}
+
+function saveTCFormFields(tcId){
+  const tcs=getTCs();
+  const idx=tcs.findIndex(t=>t.id===tcId);
+  if(idx<0){ toast('TC record not found','error'); return; }
+  const tc=tcs[idx];
+  const val=(id)=>{ const el=document.getElementById(id); return el?el.value:undefined; };
+  tc.tcNo = val('tcfTcNo')||'';
+  tc.admissionNo = val('tcfAdmissionNo')||'';
+  TC_FIELD_SCHEMA.forEach(f=>{
+    const v=val(tcFieldId(f.key));
+    if(v!==undefined) tc[f.key]=v;
+  });
+  tc.feeClearanceVerified = document.getElementById('tcfFeeVerified')?.checked||false;
+  if(tc.status==='REQUESTED') tc.status='UNDER_PREPARATION';
+  tc.updatedAt=new Date().toISOString();
+  tc.updatedBy=currentUser.name;
+  tcs[idx]=tc;
+  saveTCs(tcs);
+  toast('✅ TC details saved');
+  closeModal();
+  showPage('transferCert');
+}
+
+function issueTCConfirm(tcId){
+  if(!confirm('Are you sure you want to issue this Transfer Certificate?\n\nOnce issued, the student will be marked as Transferred.')) return;
+  issueTC(tcId);
+}
+function issueTC(tcId){
+  const tcs=getTCs();
+  const idx=tcs.findIndex(t=>t.id===tcId);
+  if(idx<0){ toast('TC record not found','error'); return; }
+  const tc=tcs[idx];
+  if(!tc.tcNo) tc.tcNo=genTCNumber();
+  if(!tc.issueDate) tc.issueDate=today();
+  tc.status='ISSUED';
+  tc.issuedBy=currentUser.name;
+  tc.updatedAt=new Date().toISOString();
+  tc.updatedBy=currentUser.name;
+  tcs[idx]=tc;
+  saveTCs(tcs);
+  const students=ls('students')||[];
+  const sIdx=students.findIndex(s=>s.id===tc.studentId);
+  if(sIdx>=0){ students[sIdx].enrollmentStatus='transferred'; ss('students',students); }
+  toast(`✅ Transfer Certificate ${tc.tcNo} issued`);
+  closeModal();
+  showPage('transferCert');
+}
+function cancelTCConfirm(tcId){
+  const reason=prompt('Reason for cancelling this TC (optional):','');
+  if(reason===null) return;
+  cancelTC(tcId, reason);
+}
+function cancelTC(tcId, reason){
+  const tcs=getTCs();
+  const idx=tcs.findIndex(t=>t.id===tcId);
+  if(idx<0){ toast('TC record not found','error'); return; }
+  const tc=tcs[idx];
+  const wasIssued = tc.status==='ISSUED';
+  tc.status='CANCELLED';
+  tc.cancelledDate=today();
+  tc.cancelledBy=currentUser.name;
+  tc.cancelReason=reason||'';
+  tc.updatedAt=new Date().toISOString();
+  tc.updatedBy=currentUser.name;
+  tcs[idx]=tc;
+  saveTCs(tcs);
+  if(wasIssued){
+    const otherIssued = tcs.some(t=>t.studentId===tc.studentId && t.status==='ISSUED' && t.id!==tc.id);
+    if(!otherIssued){
+      const students=ls('students')||[];
+      const sIdx=students.findIndex(s=>s.id===tc.studentId);
+      if(sIdx>=0){ students[sIdx].enrollmentStatus='active'; ss('students',students); }
+    }
+  }
+  toast('TC cancelled');
+  closeModal();
+  showPage('transferCert');
+}
+
+// ── Shared certificate HTML (preview modal + print window use the exact same markup) ──
+function tcCertificateHTML(tc){
+  const rows=[
+    ['Admission Number', tc.admissionNo],
+    ['Student ID', tc.studentIdSnap],
+    ['Student Name', tc.studentName],
+    ["Father's Name", tc.fatherName],
+    ["Mother's Name", tc.motherName],
+    ['Date of Birth', tc.dob?fmtDate(tc.dob):''],
+    ['Date of Birth (in words)', tc.dobWords],
+    ['Gender', tc.gender],
+    ['Nationality', tc.nationality],
+    ['Religion', tc.religion],
+    ['Category', tc.category],
+    ['Mother Tongue', tc.motherTongue],
+    ['Address', tc.address],
+    ['Date of Admission', tc.admissionDate?fmtDate(tc.admissionDate):''],
+    ['Class at Admission', tc.classAtAdmission],
+    ['Last Class Studied', tc.lastClassStudied],
+    ['Last Session', tc.lastSession],
+    ['Present Class / Section', [tc.presentClass,tc.presentSection].filter(Boolean).join(' / ')],
+    ['Roll Number', tc.roll],
+    ['Medium', tc.medium],
+    ['Date of Leaving School', tc.dateOfLeaving?fmtDate(tc.dateOfLeaving):''],
+    ['Reason for Leaving', tc.reasonForLeaving==='Other'?(tc.reasonOther||'Other'):tc.reasonForLeaving],
+    ['Last Examination Passed', tc.lastExamPassed],
+    ['Result', tc.result],
+    ['Total Attendance / Working Days', tc.totalAttendance],
+    ['Conduct / Character', tc.conduct],
+    ['School Leaving Status', tc.schoolLeavingStatus],
+    ['Government / Banglar Shiksha ID', tc.banglarShikshaId],
+    ['Remarks', tc.remarks]
+  ].filter(([,v])=>v);
+  return `
+  <div style="text-align:center;border-bottom:3px solid #1a3a6b;padding-bottom:14px;margin-bottom:18px">
+    <div style="font-family:'Playfair Display',serif;font-size:22px;font-weight:800;color:#1a3a6b">Children's Paradise School</div>
+    <div style="font-size:11px;color:#6b7a99;margin-top:2px">Uttar Radhanagar, Magrahat, South 24 Parganas, West Bengal</div>
+    <div style="font-size:16px;font-weight:900;letter-spacing:2px;color:#c9a84c;margin-top:10px">TRANSFER CERTIFICATE</div>
+  </div>
+  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:14px">
+    <div><b>TC No:</b> ${esc(tc.tcNo||'—')}</div>
+    <div><b>Date:</b> ${tc.issueDate?esc(fmtDate(tc.issueDate)):'—'}</div>
+  </div>
+  <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+    ${rows.map(([l,v])=>`<tr><td style="padding:6px 8px;border:1px solid #d0dbe8;font-weight:700;width:38%;background:#f8faff">${l}</td><td style="padding:6px 8px;border:1px solid #d0dbe8">${esc(String(v))}</td></tr>`).join('')}
+  </table>
+  <div style="margin-top:40px;display:flex;justify-content:space-between;font-size:12px">
+    <div>Class Teacher Signature: _______________</div>
+    <div>Office Signature: _______________</div>
+    <div>Principal Signature: _______________</div>
+  </div>
+  <div style="margin-top:30px;text-align:right;font-size:11px;color:#6b7a99">School Seal</div>`;
+}
+function previewTCModal(tcId){
+  const tc=getTCById(tcId);
+  if(!tc){ toast('TC record not found','error'); return; }
+  openModal(`Preview — ${esc(tc.studentName)}`, `<div style="background:white;padding:14px">${tcCertificateHTML(tc)}</div>`, [
+    {label:'<i class="fas fa-print"></i> Print', cls:'btn-primary', onclick:`printTC('${tc.id}')`},
+    {label:'Edit', cls:'btn-outline', onclick:`openTCFormModal('${tc.id}')`},
+    {label:'Close', cls:'btn-outline', onclick:'closeModal()'}
+  ], 'modal-lg');
+}
+function printTC(tcId){
+  const tc=getTCById(tcId);
+  if(!tc){ toast('TC record not found','error'); return; }
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>TC ${esc(tc.tcNo||'')} - ${esc(tc.studentName)}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
+  <style>
+    body{font-family:'Nunito',sans-serif;padding:0;color:#1a2740}
+    @page{size:A4 portrait;margin:20mm}
+  </style></head><body>${tcCertificateHTML(tc)}</body></html>`);
+  w.document.close(); w.focus(); setTimeout(()=>{w.print();w.close();},400);
+}
+
+function sendTCWhatsApp(tcId){
+  const tc=getTCById(tcId);
+  if(!tc){ toast('TC record not found','error'); return; }
+  const students=ls('students')||[];
+  const s=students.find(x=>x.id===tc.studentId);
+  const phone=s&&s.phone||'';
+  const msg=`Dear Parent,\n\nThe Transfer Certificate of ${tc.studentName}, Class ${tc.presentClass}, has been prepared/issued by Children's Paradise School.\n\nTC No: ${tc.tcNo||'—'}\nDate: ${tc.issueDate?fmtDate(tc.issueDate):'—'}\n\nPlease contact the school office for collection of the original certificate.\n\nThank you.\nChildren's Paradise School`;
+  openModal('Send TC Info via WhatsApp', `
+    ${!phone?`<div style="background:#fef2f2;color:#b91c1c;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:10px">No phone number on file for this student — you can still copy the message manually.</div>`:''}
+    <textarea id="tcWaMsg" rows="10" style="width:100%;padding:10px;border-radius:8px;border:1.5px solid var(--border);font-family:inherit">${esc(msg)}</textarea>
+  `, [
+    {label:'<i class="fab fa-whatsapp"></i> Send', cls:'btn-success', onclick:`sendTCWhatsAppFinal('${phone}')`},
+    {label:'Close', cls:'btn-outline', onclick:'closeModal()'}
+  ]);
+}
+function sendTCWhatsAppFinal(phone){
+  const msg=document.getElementById('tcWaMsg')?.value||'';
+  const url = phone ? `https://wa.me/91${phone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+  window.open(url,'_blank');
+  closeModal();
+}
+
+function printTCRegister(){
+  const tcs=getTCs().filter(t=>t.status==='ISSUED').sort((a,b)=>(a.tcNo||'').localeCompare(b.tcNo||''));
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>TC Register</title>
+  <style>
+    body{font-family:'Nunito',sans-serif;padding:20px;color:#1a2740}
+    table{width:100%;border-collapse:collapse;font-size:10.5px}
+    th{background:#1a3a6b;color:white;padding:6px}
+    td{padding:5px 6px;border:1px solid #d0dbe8}
+    @page{size:A4 landscape;margin:12mm}
+  </style></head><body>
+  <div style="text-align:center;margin-bottom:14px">
+    <div style="font-size:18px;font-weight:900;color:#1a3a6b">Children's Paradise School</div>
+    <div style="font-size:12px;color:#6b7a99">TC Register</div>
+  </div>
+  <table><thead><tr><th>Sl No</th><th>TC No.</th><th>Date</th><th>Student Name</th><th>Father's Name</th><th>Class</th><th>Roll</th><th>Admission No</th><th>Date of Leaving</th><th>Reason</th><th>Destination School</th><th>Status</th></tr></thead>
+  <tbody>${tcs.map((t,i)=>`<tr><td>${i+1}</td><td>${esc(t.tcNo||'')}</td><td>${t.issueDate?esc(fmtDate(t.issueDate)):''}</td><td>${esc(t.studentName)}</td><td>${esc(t.fatherName||'')}</td><td>${esc(t.presentClass||'')}</td><td>${esc(t.roll||'')}</td><td>${esc(t.admissionNo||'')}</td><td>${t.dateOfLeaving?esc(fmtDate(t.dateOfLeaving)):''}</td><td>${esc(t.reasonForLeaving==='Other'?(t.reasonOther||'Other'):(t.reasonForLeaving||''))}</td><td>${esc(t.destinationSchool||'')}</td><td>${esc(TC_STATUS_META[t.status]&&TC_STATUS_META[t.status].label||t.status)}</td></tr>`).join('')}</tbody></table>
+  </body></html>`);
+  w.document.close(); w.focus(); setTimeout(()=>{w.print();w.close();},400);
+}
+function exportTCRegisterCSV(){
+  const tcs=getTCs().sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+  const rows=[['Sl No','TC No','Date','Student Name',"Father's Name",'Class','Roll','Admission No','Date of Leaving','Reason','Destination School','Status']];
+  tcs.forEach((t,i)=>rows.push([i+1,t.tcNo||'',t.issueDate?fmtDate(t.issueDate):'',t.studentName,t.fatherName||'',t.presentClass||'',t.roll||'',t.admissionNo||'',t.dateOfLeaving?fmtDate(t.dateOfLeaving):'',t.reasonForLeaving==='Other'?(t.reasonOther||'Other'):(t.reasonForLeaving||''),t.destinationSchool||'',TC_STATUS_META[t.status]&&TC_STATUS_META[t.status].label||t.status]));
+  const csv=rows.map(r=>r.map(c=>{const v=String(c===null||c===undefined?'':c);return/[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\r\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='tc-register.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+
 function renderNeedAttention(){
   const session=getActiveSession();
-  const isTeacher=currentUser&&currentUser.role==='teacher';
-  const teacherObj = isTeacher ? (ls('teachers')||[]).find(x=>x.id===currentUser.id||x.id===currentUser.teacherId) : null;
   const myClasses = teacherObj?.classes||[];
   const classes = isTeacher ? myClasses : getAllClasses();
   const cfg=getAttentionSettings();
@@ -16343,7 +18387,7 @@ function openRequestTeacherFeedback(followUpId){
   const f=followUps.find(x=>x.id===followUpId);
   if(!f) return;
   const teachers=findClassTeachers(f.className);
-  const allTeachers=ls('teachers')||[];
+  const allTeachers=getTeachingStaff();
   const options=teachers.length?teachers:allTeachers;
   openModal('Request Teacher Feedback',`
     <div class="form-group"><label>Select Teacher</label>
@@ -19289,7 +21333,7 @@ function renderPTMBooking(){
 }
 function openPTM(){
   const students=(ls('students')||[]).filter(s=>s.session===getActiveSession());
-  const teachers=ls('teachers')||[];
+  const teachers=getTeachingStaff();
   openModal('Schedule PTM',`
   <div class="form-row">
     <div class="form-group"><label>Student</label>
@@ -19495,7 +21539,7 @@ function renderSubstitute(){
   </div>`;
 }
 function openSubstitute(){
-  const teachers=ls('teachers')||[];
+  const teachers=getTeachingStaff();
   const classes=getAllClasses();
   openModal('Assign Substitute Teacher',`
   <div class="form-row">
@@ -19882,7 +21926,7 @@ function clearAllExams(){
 
 // switchProfileTab — robust version handles all 7 tabs
 function switchProfileTab(tabId, btn){
-  ['pfBasic','pfFee','pfMarks','pfPerf','pfAtt','pfHistory','pfTxn','pfGov'].forEach(t=>{
+  ['pfBasic','pfFee','pfMarks','pfPerf','pfAtt','pfHistory','pfTxn','pfGov','pfTC'].forEach(t=>{
     const el=document.getElementById(t);
     if(el) el.style.display='none';
   });
@@ -20012,6 +22056,17 @@ function afterRender(pageId){
     // Panchayat Admission Map: init Leaflet map + chart once the container is in the DOM
     if(pageId==='panchayatMap'){
       setTimeout(()=>{ if(typeof initPanchayatMap==='function') initPanchayatMap(); }, 100);
+    }
+    // Teacher Dashboard: init workload charts once canvases are in the DOM
+    if(pageId==='teacherWorkload'){
+      setTimeout(()=>{ if(typeof initTeacherWorkloadCharts==='function') initTeacherWorkloadCharts(); }, 100);
+    }
+    // Student Dismissal: populate the default tab once its container is in the DOM
+    if(pageId==='dismissal'){
+      setTimeout(()=>{ if(typeof loadDismissalOverview==='function') loadDismissalOverview(); }, 50);
+    }
+    if(pageId==='myDismissal'){
+      setTimeout(()=>{ if(typeof loadMyDismissalList==='function') loadMyDismissalList(); }, 50);
     }
   } catch(e){ console.error('afterRender error:', e); }
 }
@@ -20184,7 +22239,8 @@ if(typeof SUBJECTS_DEFAULT==='undefined'){
   const defaults={
     exams:[], lessonPlans:[], logbookData:[], ptmBookings:[],
     conductRecs:[], coExtra:[], subTeachers:[], helpdeskTix:[],
-    anonComplaints:[], schoolDocs:[], assetReg:[], academicHistory:{}
+    anonComplaints:[], schoolDocs:[], assetReg:[], academicHistory:{},
+    transferCertificates:[]
   };
   Object.entries(defaults).forEach(([key,val])=>{
     try{ if(!ls(key)) ss(key,val); } catch(e){}
@@ -20199,6 +22255,40 @@ if(typeof SUBJECTS_DEFAULT==='undefined'){
 })();
 
 console.log('✅ CPS ERP v2 — all patches applied successfully');
+
+// ============================================================
+// RESPONSIVE SAFETY NET: auto-wrap any <table> not already inside
+// a .table-wrap so it scrolls horizontally on phones/tablets instead
+// of breaking the layout. Runs once on load and keeps watching for
+// new tables rendered by the app's page-switching / modal system.
+// ============================================================
+(function autoWrapTables(){
+  function wrapTable(t){
+    if(!t || !t.parentNode) return;
+    if(t.closest('.table-wrap') || t.closest('.auto-table-wrap')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'auto-table-wrap';
+    t.parentNode.insertBefore(wrap, t);
+    wrap.appendChild(t);
+  }
+  function scan(root){
+    try{ (root||document).querySelectorAll('table').forEach(wrapTable); }catch(e){}
+  }
+  document.addEventListener('DOMContentLoaded', function(){ scan(document); });
+  window.addEventListener('load', function(){ scan(document); });
+  try{
+    const mo = new MutationObserver(function(mutations){
+      mutations.forEach(function(m){
+        (m.addedNodes||[]).forEach(function(n){
+          if(!n || n.nodeType!==1) return;
+          if(n.tagName==='TABLE') wrapTable(n);
+          else if(n.querySelectorAll) scan(n);
+        });
+      });
+    });
+    mo.observe(document.body, {childList:true, subtree:true});
+  }catch(e){}
+})();
 
 </script>
 </body>
