@@ -4952,7 +4952,7 @@ function renderDueReport(){
         <select id="drClass"><option value="">All Classes</option>${classes.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select>
       </div>
       <div class="form-group"><label>Fee Type</label>
-        <select id="drType"><option value="">All Types</option><option>Admission</option><option>Monthly</option><option>Exam</option></select>
+        <select id="drType"><option value="">All Types</option><option>Admission</option><option>Monthly</option><option>Exam</option><option value="MonthlyZero">Monthly — No Payment Since January</option></select>
       </div>
       <div class="form-group"><label>Overdue Only</label>
         <select id="drOverdue"><option value="">All</option><option value="yes">3+ Months Overdue</option></select>
@@ -16484,11 +16484,15 @@ function printDueReport(){
   generateDueReport();
   setTimeout(()=>{
     const cls  = document.getElementById('drClass')?.value||'All';
+    const type = document.getElementById('drType')?.value||'';
+    const typeLabel = type==='MonthlyZero' ? 'Monthly Fee — No Payment Since January'
+      : type ? type+' Due' : '';
     const rows = document.querySelectorAll('#dueReportPrint tbody tr');
     let rowsHTML='';
     rows.forEach(tr=>{ rowsHTML+=`<tr>${[...tr.cells].slice(0,-1).map(td=>`<td>${td.textContent.trim()}</td>`).join('')}</tr>`; });
     const body=`
     ${schoolHeaderHTML(`Fee Due Report — Session ${getActiveSession()} ${cls!=='All'?'| '+cls:''}`)}
+    ${typeLabel?`<div style="text-align:center;font-size:13px;font-weight:800;color:#c2410c;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px;margin:10px 0 14px">Fee Type: ${esc(typeLabel)}</div>`:''}
     <table>
       <thead><tr><th>ID</th><th>Name</th><th>Class</th><th>Roll</th><th>Phone</th><th>Adm Due</th><th>Monthly Due</th><th>Exam Due</th><th>Overdue</th><th>Total Due</th></tr></thead>
       <tbody>${rowsHTML}</tbody>
@@ -16935,21 +16939,29 @@ function generateDueReport(){
   let rows=[];
   students.forEach(s=>{
     const t=computeStudentFeeTotals(s);
-    const admDue     = (!type||type==='Admission') ? t.admDue : 0;
-    const monthlyDue = (!type||type==='Monthly')   ? t.monthlyDueAmt : 0;
-    const examDue     = (!type||type==='Exam')      ? t.examDueAmt : 0;
-    const overdueAmt = (!type||type==='Monthly')   ? t.overdueAmt : 0;
-    const totalDue=admDue+monthlyDue+examDue;
-    if(totalDue>0&&(!overdueOnly||overdueAmt>0))rows.push({s,admDue,monthlyDue,examDue,overdueAmt,totalDue});
+    // The Fee Type filter only decides WHICH students are listed (does this
+    // student have a due in the selected type?) — once listed, every due
+    // column always shows that student's real Admission/Monthly/Exam/Overdue
+    // amounts, not just the selected type, so nothing looks blank.
+    const admDue=t.admDue, monthlyDue=t.monthlyDueAmt, examDue=t.examDueAmt, overdueAmt=t.overdueAmt, totalDue=t.totalDue;
+    const matchesType = !type
+      || (type==='Admission' && admDue>0)
+      || (type==='Monthly'   && monthlyDue>0)
+      || (type==='Exam'      && examDue>0)
+      || (type==='MonthlyZero' && t.monthly>0 && t.monthPaidCount===0 && t.monthDueCount>0);
+    if(matchesType && totalDue>0 && (!overdueOnly||overdueAmt>0)) rows.push({s,admDue,monthlyDue,examDue,overdueAmt,totalDue});
   });
+  const typeLabel = type==='MonthlyZero' ? 'Monthly Fee — No Payment Since January' : (type ? type+' Due' : '');
   const totalAll=rows.reduce((a,r)=>a+r.totalDue,0);
   document.getElementById('dueReportResult').innerHTML=`
   <div class="card" id="dueReportPrint">
-    <div class="card-title"><i class="fas fa-file-invoice-dollar"></i> Due Report — ${getActiveSession()} ${cls?'| '+cls:''}</div>
+    <div class="card-title"><i class="fas fa-file-invoice-dollar"></i> Due Report — ${getActiveSession()} ${cls?'| '+cls:''} ${typeLabel?'| '+esc(typeLabel):''}</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:14px">
-      <div style="padding:12px;background:#fee2e2;border-radius:10px"><div class="text-xs text-muted">Total Due</div><div style="font-size:20px;font-weight:900;color:var(--danger)">₹${totalAll.toLocaleString()}</div></div>
+      <div style="padding:12px;background:#fee2e2;border-radius:10px"><div class="text-xs text-muted">Total Due (all fee types)</div><div style="font-size:20px;font-weight:900;color:var(--danger)">₹${totalAll.toLocaleString()}</div></div>
+      ${type?`<div style="padding:12px;background:#fff7ed;border-radius:10px"><div class="text-xs text-muted">${esc(typeLabel)}</div><div style="font-size:20px;font-weight:900;color:#c2410c">₹${rows.reduce((a,r)=>a+(type==='Admission'?r.admDue:(type==='Monthly'||type==='MonthlyZero')?r.monthlyDue:r.examDue),0).toLocaleString()}</div></div>`:''}
       <div style="padding:12px;background:#f8faff;border-radius:10px"><div class="text-xs text-muted">Students with Due</div><div style="font-size:20px;font-weight:900;color:var(--primary)">${rows.length}</div></div>
     </div>
+    ${typeLabel?`<div class="text-xs text-muted" style="margin:-8px 0 12px 2px">Showing students matching "${esc(typeLabel)}" — each row still shows their full Admission/Monthly/Exam breakdown.</div>`:''}
     <div class="table-wrap"><table>
       <thead><tr><th>ID</th><th>Name</th><th>Class</th><th>Roll</th><th>Phone</th><th>Adm Due</th><th>Monthly Due</th><th>Exam Due</th><th>Overdue</th><th>Total</th><th class="no-print">WA</th></tr></thead>
       <tbody>
