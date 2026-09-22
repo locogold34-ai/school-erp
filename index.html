@@ -1821,18 +1821,30 @@ function logGovActivity(studentId,patch){
 }
 function computeGovStats(students){
   const all=getAllGovRecords();
+  const STATUSES=['ID_CREATED','FORM_SUBMITTED','EXISTING_ID_IN_GOVT_SCHOOL','FORM_NOT_SUBMITTED'];
   const stats={total:students.length,ID_CREATED:0,FORM_SUBMITTED:0,EXISTING_ID_IN_GOVT_SCHOOL:0,FORM_NOT_SUBMITTED:0,green:0,yellow:0,blue:0,red:0,
-    totalBoys:0,totalGirls:0,totalOther:0,idCreatedBoys:0,idCreatedGirls:0,idCreatedOther:0};
+    totalBoys:0,totalGirls:0,totalOther:0,
+    genderByStatus:{ID_CREATED:{boys:0,girls:0,other:0},FORM_SUBMITTED:{boys:0,girls:0,other:0},EXISTING_ID_IN_GOVT_SCHOOL:{boys:0,girls:0,other:0},FORM_NOT_SUBMITTED:{boys:0,girls:0,other:0}}};
   students.forEach(s=>{
     const rec=all[s.id]||defaultGovRecord();
     if(stats[rec.status]!==undefined) stats[rec.status]++;
     stats[govBucket(rec)]++;
     const g=(s.gender||'').toLowerCase();
-    if(g==='male'){ stats.totalBoys++; if(rec.status==='ID_CREATED') stats.idCreatedBoys++; }
-    else if(g==='female'){ stats.totalGirls++; if(rec.status==='ID_CREATED') stats.idCreatedGirls++; }
-    else { stats.totalOther++; if(rec.status==='ID_CREATED') stats.idCreatedOther++; }
+    const key = g==='male'?'boys' : g==='female'?'girls' : 'other';
+    stats[key==='boys'?'totalBoys':key==='girls'?'totalGirls':'totalOther']++;
+    if(STATUSES.includes(rec.status)) stats.genderByStatus[rec.status][key]++;
   });
+  // Back-compat aliases (some pages read these directly)
+  stats.idCreatedBoys=stats.genderByStatus.ID_CREATED.boys;
+  stats.idCreatedGirls=stats.genderByStatus.ID_CREATED.girls;
+  stats.idCreatedOther=stats.genderByStatus.ID_CREATED.other;
   return stats;
+}
+function govGenderSubLine(stats,status){
+  const g = status ? stats.genderByStatus[status] : {boys:stats.totalBoys,girls:stats.totalGirls,other:stats.totalOther};
+  const count = status ? stats[status] : stats.total;
+  if(!count) return '';
+  return `👦 ${g.boys} Boys &nbsp;·&nbsp; 👧 ${g.girls} Girls${g.other?` &nbsp;·&nbsp; ${g.other} Other`:''}`;
 }
 function govStatusBadge(status){
   const m=GOV_STATUS_META[status]||GOV_STATUS_META['FORM_NOT_SUBMITTED'];
@@ -2979,12 +2991,13 @@ function renderAdminDashboard(){
   ${(()=>{const gStats=computeGovStats(sessStudents);return `
   <div class="card" style="margin-bottom:20px;border-left:4px solid #c9a84c;cursor:pointer" onclick="showPage('govDashboard')">
     <div class="card-title"><i class="fas fa-landmark" style="color:#c9a84c"></i> 🏛 Government Records</div>
-    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;font-size:13px;font-weight:700">
-      <span>ID Completed: <b style="color:#15803d">${gStats.ID_CREATED+gStats.VERIFIED}</b></span>
-      <span>Pending: <b style="color:#a16207">${gStats.ID_PENDING+gStats.NOT_SUBMITTED+gStats.FORM_SUBMITTED}</b></span>
-      <span>TC Required: <b style="color:var(--primary)">${gStats.TC_REQUIRED}</b></span>
-      <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();showPage('govDashboard')" style="margin-left:auto">View Government Records</button>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;font-size:12.5px">
+      <div><span style="font-weight:700">🟢 ID Created: <b style="color:#15803d">${gStats.ID_CREATED}</b></span><div class="text-xs text-muted">${govGenderSubLine(gStats,'ID_CREATED')}</div></div>
+      <div><span style="font-weight:700">🟡 Form Submitted: <b style="color:#a16207">${gStats.FORM_SUBMITTED}</b></span><div class="text-xs text-muted">${govGenderSubLine(gStats,'FORM_SUBMITTED')}</div></div>
+      <div><span style="font-weight:700">🔵 Existing ID: <b style="color:#1d4ed8">${gStats.EXISTING_ID_IN_GOVT_SCHOOL}</b></span><div class="text-xs text-muted">${govGenderSubLine(gStats,'EXISTING_ID_IN_GOVT_SCHOOL')}</div></div>
+      <div><span style="font-weight:700">🔴 Not Submitted: <b style="color:#dc2626">${gStats.FORM_NOT_SUBMITTED}</b></span><div class="text-xs text-muted">${govGenderSubLine(gStats,'FORM_NOT_SUBMITTED')}</div></div>
     </div>
+    <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();showPage('govDashboard')" style="margin-top:10px">View Government Records</button>
   </div>`;})()}
 
   ${(()=>{const dSum=getSchoolDismissalSummary(session,today());return dSum.total?`
@@ -3541,11 +3554,11 @@ function renderGovDashboard(){
   const stats=computeGovStats(students);
   const pct=stats.total?Math.round(stats.ID_CREATED/stats.total*100):0;
   const cards=[
-    ['👨‍🎓','Total Students',stats.total,'badge-primary',`👦 ${stats.totalBoys} Boys &nbsp;·&nbsp; 👧 ${stats.totalGirls} Girls${stats.totalOther?` &nbsp;·&nbsp; ${stats.totalOther} Other`:''}`],
-    ['🟢','ID Created',stats.ID_CREATED,'badge-success',stats.ID_CREATED?`👦 ${stats.idCreatedBoys} Boys &nbsp;·&nbsp; 👧 ${stats.idCreatedGirls} Girls${stats.idCreatedOther?` &nbsp;·&nbsp; ${stats.idCreatedOther} Other`:''}`:''],
-    ['🟡','Form Submitted',stats.FORM_SUBMITTED,'badge-warning'],
-    ['🔵','Existing ID in Govt. School',stats.EXISTING_ID_IN_GOVT_SCHOOL,'badge-info'],
-    ['🔴','Form Not Submitted',stats.FORM_NOT_SUBMITTED,'badge-danger']
+    ['👨‍🎓','Total Students',stats.total,'badge-primary',govGenderSubLine(stats,null)],
+    ['🟢','ID Created',stats.ID_CREATED,'badge-success',govGenderSubLine(stats,'ID_CREATED')],
+    ['🟡','Form Submitted',stats.FORM_SUBMITTED,'badge-warning',govGenderSubLine(stats,'FORM_SUBMITTED')],
+    ['🔵','Existing ID in Govt. School',stats.EXISTING_ID_IN_GOVT_SCHOOL,'badge-info',govGenderSubLine(stats,'EXISTING_ID_IN_GOVT_SCHOOL')],
+    ['🔴','Form Not Submitted',stats.FORM_NOT_SUBMITTED,'badge-danger',govGenderSubLine(stats,'FORM_NOT_SUBMITTED')]
   ];
   return `
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
