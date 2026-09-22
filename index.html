@@ -1821,11 +1821,16 @@ function logGovActivity(studentId,patch){
 }
 function computeGovStats(students){
   const all=getAllGovRecords();
-  const stats={total:students.length,ID_CREATED:0,FORM_SUBMITTED:0,EXISTING_ID_IN_GOVT_SCHOOL:0,FORM_NOT_SUBMITTED:0,green:0,yellow:0,blue:0,red:0};
+  const stats={total:students.length,ID_CREATED:0,FORM_SUBMITTED:0,EXISTING_ID_IN_GOVT_SCHOOL:0,FORM_NOT_SUBMITTED:0,green:0,yellow:0,blue:0,red:0,
+    totalBoys:0,totalGirls:0,totalOther:0,idCreatedBoys:0,idCreatedGirls:0,idCreatedOther:0};
   students.forEach(s=>{
     const rec=all[s.id]||defaultGovRecord();
     if(stats[rec.status]!==undefined) stats[rec.status]++;
     stats[govBucket(rec)]++;
+    const g=(s.gender||'').toLowerCase();
+    if(g==='male'){ stats.totalBoys++; if(rec.status==='ID_CREATED') stats.idCreatedBoys++; }
+    else if(g==='female'){ stats.totalGirls++; if(rec.status==='ID_CREATED') stats.idCreatedGirls++; }
+    else { stats.totalOther++; if(rec.status==='ID_CREATED') stats.idCreatedOther++; }
   });
   return stats;
 }
@@ -2061,6 +2066,7 @@ const NAV_ALL=[
   {id:'schoolToday',icon:'fas fa-broadcast-tower',label:'School Today',roles:['principal']},
   {id:'students',icon:'fas fa-user-graduate',label:'Students',roles:['principal','accountant']},
   {id:'needAttention',icon:'fas fa-exclamation-triangle',label:'Students Need Attention',roles:['principal','teacher']},
+  {id:'continuation',icon:'fas fa-user-clock',label:'Student Continuation',roles:['principal','teacher']},
   {id:'panchayatMap',icon:'fas fa-map-marked-alt',label:'Panchayat Admission Map',roles:['principal']},
   {id:'transferCert',icon:'fas fa-file-contract',label:'Transfer Certificate (TC)',roles:['principal','accountant']},
   {id:'teachers',icon:'fas fa-chalkboard-teacher',label:'Staff',roles:['principal']},
@@ -2118,7 +2124,7 @@ function buildNav(){
   const role = currentUser.role;
   const groups = [
     { label:'📊 Overview', pages:['dashboard','schoolToday','studentSearch'] },
-    { label:'👨‍🎓 Students & Parents', pages:['students','needAttention','panchayatMap','transferCert','promotion','conduct','coCurricular','ptmBooking'] },
+    { label:'👨‍🎓 Students & Parents', pages:['students','needAttention','continuation','panchayatMap','transferCert','promotion','conduct','coCurricular','ptmBooking'] },
     { label:'📚 Academic', pages:['attendance','monthlyAttendance','examRegister','teacherMarks','marks','reportCard','performance','top10','routine','syllabus','examMgmt','hallTicket','admitCard','lessonPlan','logbook'] },
     { label:'👥 Staff', pages:['teachers','teacherWorkload','substitute'] },
     { label:'🎒 Student Dismissal', pages:['dismissal','myDismissal'] },
@@ -2146,7 +2152,7 @@ function buildNav(){
 
 function showPage(pageId){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.page===pageId));
-  const titles={dashboard:'Dashboard',schoolToday:'School Today',substituteHistory:'Substitute History',students:'Student Management',needAttention:'Students Need Attention',teachers:'Staff Management',feeCollection:'Fee Collection',feeSettings:'Fee Settings',dueReport:'Due Report',dueNotice:'Due Notice Cards',feeRegister:'Fee Register',cashBook:'Society Cash Book',attendance:'Daily Attendance',examRegister:'Student Exam Register',marks:'Marks & Results',reportCard:'Report Card',routine:'Class Routine',notices:'Notice Board',calendar:'School Calendar',stock:'Stock & Shop',finance:'Financial Analysis',promotion:'Session Promotion',idCard:'ID Card Generator',dataManagement:'Data Management',settings:'Settings',academicSettings:'Class Manager & Academic Settings',sessionSettings:'Session Settings',syllabus:'Syllabus Manager',admitCard:'Admit Cards',performance:'Performance Analysis',monthlyAttendance:'Monthly Attendance Entry',allTransactions:'All Transactions',top10:'🏆 Top 10 Result Board',examMgmt:'📋 Exam Management',hallTicket:'🎫 Hall Ticket Generator',lessonPlan:'📖 Lesson Planning',logbook:'📓 Teaching Logbook',ptmBooking:'🤝 PTM Booking',conduct:'🛡️ Conduct & Discipline',coCurricular:'🏅 Co-Curricular Activities',substitute:'🔄 Substitute Teachers',helpdesk:'🎧 Helpdesk',complaints:'💬 Complaints',documents:'📁 Documents',assets:'💻 Asset Register',govDashboard:'🏛 Government ID Dashboard',govClassRecords:'🏛 Class-wise Government Records',govFollowUp:'⚠️ Pending Government ID Follow-up',govAgeVerification:'🎂 Age & Government Class Verification',studentSearch:'⚡ Fast Search'};
+  const titles={dashboard:'Dashboard',schoolToday:'School Today',substituteHistory:'Substitute History',students:'Student Management',needAttention:'Students Need Attention',continuation:'Student Continuation',teachers:'Staff Management',feeCollection:'Fee Collection',feeSettings:'Fee Settings',dueReport:'Due Report',dueNotice:'Due Notice Cards',feeRegister:'Fee Register',cashBook:'Society Cash Book',attendance:'Daily Attendance',examRegister:'Student Exam Register',marks:'Marks & Results',reportCard:'Report Card',routine:'Class Routine',notices:'Notice Board',calendar:'School Calendar',stock:'Stock & Shop',finance:'Financial Analysis',promotion:'Session Promotion',idCard:'ID Card Generator',dataManagement:'Data Management',settings:'Settings',academicSettings:'Class Manager & Academic Settings',sessionSettings:'Session Settings',syllabus:'Syllabus Manager',admitCard:'Admit Cards',performance:'Performance Analysis',monthlyAttendance:'Monthly Attendance Entry',allTransactions:'All Transactions',top10:'🏆 Top 10 Result Board',examMgmt:'📋 Exam Management',hallTicket:'🎫 Hall Ticket Generator',lessonPlan:'📖 Lesson Planning',logbook:'📓 Teaching Logbook',ptmBooking:'🤝 PTM Booking',conduct:'🛡️ Conduct & Discipline',coCurricular:'🏅 Co-Curricular Activities',substitute:'🔄 Substitute Teachers',helpdesk:'🎧 Helpdesk',complaints:'💬 Complaints',documents:'📁 Documents',assets:'💻 Asset Register',govDashboard:'🏛 Government ID Dashboard',govClassRecords:'🏛 Class-wise Government Records',govFollowUp:'⚠️ Pending Government ID Follow-up',govAgeVerification:'🎂 Age & Government Class Verification',studentSearch:'⚡ Fast Search'};
   document.getElementById('topbarTitle').textContent=(pageId==='teacherWorkload'?'👨‍🏫 Teacher Dashboard':pageId==='dismissal'||pageId==='myDismissal'?'🎒 Student Dismissal':(titles[pageId]||pageId));
   const content=document.getElementById('mainContent');
   // Reset any leftover transitions, set opacity 0, render, then fade in
@@ -2196,6 +2202,7 @@ function renderPage(p){
     case 'substituteHistory': return renderSubstituteHistory();
     case 'students': return renderStudents();
     case 'needAttention': return renderNeedAttention();
+    case 'continuation': return renderContinuation();
     case 'panchayatMap': return renderPanchayatMap();
     case 'transferCert': return renderTC();
     case 'teachers': return renderTeachers();
@@ -3534,8 +3541,8 @@ function renderGovDashboard(){
   const stats=computeGovStats(students);
   const pct=stats.total?Math.round(stats.ID_CREATED/stats.total*100):0;
   const cards=[
-    ['👨‍🎓','Total Students',stats.total,'badge-primary'],
-    ['🟢','ID Created',stats.ID_CREATED,'badge-success'],
+    ['👨‍🎓','Total Students',stats.total,'badge-primary',`👦 ${stats.totalBoys} Boys &nbsp;·&nbsp; 👧 ${stats.totalGirls} Girls${stats.totalOther?` &nbsp;·&nbsp; ${stats.totalOther} Other`:''}`],
+    ['🟢','ID Created',stats.ID_CREATED,'badge-success',stats.ID_CREATED?`👦 ${stats.idCreatedBoys} Boys &nbsp;·&nbsp; 👧 ${stats.idCreatedGirls} Girls${stats.idCreatedOther?` &nbsp;·&nbsp; ${stats.idCreatedOther} Other`:''}`:''],
     ['🟡','Form Submitted',stats.FORM_SUBMITTED,'badge-warning'],
     ['🔵','Existing ID in Govt. School',stats.EXISTING_ID_IN_GOVT_SCHOOL,'badge-info'],
     ['🔴','Form Not Submitted',stats.FORM_NOT_SUBMITTED,'badge-danger']
@@ -3566,12 +3573,13 @@ function renderGovDashboard(){
   </div>
 
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
-    ${cards.map(([icon,label,val,badge])=>`
+    ${cards.map(([icon,label,val,badge,sub])=>`
       <div style="background:white;border-radius:14px;padding:14px 16px;border:1.5px solid #e8eef5;display:flex;align-items:center;gap:8px">
         <div style="font-size:22px">${icon}</div>
         <div style="min-width:0">
           <div style="font-size:11px;color:#6b7a99;font-weight:700">${label}</div>
           <div style="font-size:18px;font-weight:900;color:#0d1f3c">${val} <span style="font-size:11px;font-weight:700;color:#6b7a99">(${stats.total?Math.round(val/stats.total*100):0}%)</span></div>
+          ${sub?`<div style="font-size:10.5px;color:#94a3b8;font-weight:700;margin-top:2px">${sub}</div>`:''}
         </div>
       </div>`).join('')}
   </div>
@@ -7472,6 +7480,7 @@ function renderReportCard(){
     <button class="btn btn-primary" onclick="loadReportCard()"><i class="fas fa-eye"></i> View Report Card</button>
     <button class="btn btn-gold ml-8" onclick="loadClassReportCards()"><i class="fas fa-users"></i> Class Report</button>
     <button class="btn btn-outline ml-8" onclick="openDevProfileEntry()"><i class="fas fa-star-half-alt"></i> Development Profile</button>
+    <button class="btn btn-outline ml-8" onclick="printBlankReportCardTemplate()"><i class="fas fa-file-signature"></i> Print Blank Template</button>
   </div>
   <div id="reportCardArea"></div>`;
 }
@@ -7489,8 +7498,124 @@ function loadClassReportCards(){
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-primary" onclick="printAllReportCards('${cls}')"><i class="fas fa-print"></i> Print All Report Cards</button>
       <button class="btn btn-outline" onclick="downloadClassReportCardsJPG('${cls}')"><i class="fas fa-file-archive"></i> Download All as JPG (ZIP)</button>
+      <button class="btn btn-gold" onclick="printBlankReportCards('${cls}')"><i class="fas fa-file-signature"></i> Print Blank Report Cards</button>
     </div>
+    <div class="text-xs text-muted" style="margin-top:6px">💡 "Print Blank Report Cards" gives one card per student (name/roll/class filled in, subjects listed) with every mark, attendance, rank, total and remarks box left empty — for when marks need to be written in by hand.</div>
   </div>`;
+}
+
+// ── Blank Report Card (name/class/roll/subjects pre-printed, everything the
+// teacher would normally compute or enter left as an empty box to hand-write —
+// for use when data entry/computation isn't available) ──
+function blankReportCardHTML(s, session, subjects, terms){
+  return `<div class="rc-page">
+    <div class="rc-top">
+      <div class="rc-logo">${SCHOOL.logo?`<img src="${SCHOOL.logo}">`:'🎓'}</div>
+      <div style="flex:1">
+        <div class="rc-sname">${esc(SCHOOL.name)}</div>
+        <div class="rc-saddr">${esc(SCHOOL.address)}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:9px;color:#94a3b8">Session</div>
+        <div style="font-size:14px;font-weight:900;color:#c9a84c">${esc(String(session||''))}</div>
+      </div>
+    </div>
+    <div class="rc-titlebar">Progress Report Card</div>
+    <table class="rc-info">
+      <tr><td class="l">Name</td><td class="v">${s?esc(s.name):'&nbsp;'}</td><td class="l">Class</td><td class="v">${s?esc(s.class):'&nbsp;'}</td></tr>
+      <tr><td class="l">Roll No.</td><td class="v">${s?s.roll:'&nbsp;'}</td><td class="l">Attendance</td><td class="v">&nbsp;</td></tr>
+      <tr><td class="l">Father's Name</td><td class="v">${s&&s.fatherName?esc(s.fatherName):'&nbsp;'}</td><td class="l">Class Rank</td><td class="v">&nbsp;</td></tr>
+    </table>
+    ${subjects.length?`<table class="rc-marks">
+      <thead><tr><th style="text-align:left">Subject</th>${terms.map(t=>`<th>${esc(t)}</th>`).join('')}<th>Final %</th></tr></thead>
+      <tbody>${subjects.map(sub=>`<tr><td style="text-align:left;font-weight:700">${esc(sub)}</td>${terms.map(()=>'<td>&nbsp;</td>').join('')}<td>&nbsp;</td></tr>`).join('')}</tbody>
+    </table>`:`<table class="rc-marks">
+      <thead><tr><th style="text-align:left">Subject</th>${terms.map(t=>`<th>${esc(t)}</th>`).join('')}<th>Final %</th></tr></thead>
+      <tbody>${[1,2,3,4,5,6].map(()=>`<tr><td style="text-align:left">&nbsp;</td>${terms.map(()=>'<td>&nbsp;</td>').join('')}<td>&nbsp;</td></tr>`).join('')}</tbody>
+    </table>`}
+    <div class="rc-resbar">
+      <div><div class="l">Total</div><div class="v">&nbsp;</div></div>
+      <div><div class="l">Percentage</div><div class="v">&nbsp;</div></div>
+      <div><div class="l">Grade</div><div class="v">&nbsp;</div></div>
+      <div><div class="l">Result</div><div class="v">&nbsp;</div></div>
+    </div>
+    <div class="rc-remarks">
+      <div><div class="l">Class Teacher Remarks</div><div class="txt" style="min-height:32px">&nbsp;</div></div>
+      <div><div class="l">Principal Remarks</div><div class="txt" style="min-height:32px">&nbsp;</div></div>
+    </div>
+    <div class="rc-sigrow">
+      <div><div class="line"></div>Class Teacher</div>
+      <div><div class="line"></div>Headmaster / Principal</div>
+      <div><div class="line"></div>Parent / Guardian</div>
+    </div>
+    <div class="rc-footer">${esc(SCHOOL.name)} · ${esc(SCHOOL.address)} · Blank template — for hand-written entry</div>
+  </div>`;
+}
+function reportCardPrintCSS(){
+  return `
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Nunito',sans-serif;color:#1a2740}
+    @media print{.no-print{display:none}}
+    .no-print{margin:10px}
+    .no-print button{padding:10px 24px;background:#1a3a6b;color:white;border:none;border-radius:8px;font-size:13px;cursor:pointer}
+    .rc-page{page-break-after:always;padding:14mm 14mm;border:2.5px solid #1a3a6b;border-radius:8px;margin:8px;font-size:11px}
+    .rc-top{display:flex;align-items:center;gap:10px;background:linear-gradient(135deg,#0d1f3c,#2456a4);padding:10px 14px;border-radius:6px;color:white;margin-bottom:0}
+    .rc-logo{width:44px;height:44px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:3px}
+    .rc-logo img{width:100%;height:100%;object-fit:contain}
+    .rc-sname{font-family:'Playfair Display',serif;font-size:15px;font-weight:800}
+    .rc-saddr{font-size:9px;color:rgba(255,255,255,.7);margin-top:1px}
+    .rc-titlebar{background:linear-gradient(90deg,#7c5c0a,#c9a84c,#f0c040,#c9a84c,#7c5c0a);padding:5px;text-align:center;font-size:11px;font-weight:900;color:#1a2740;letter-spacing:2px;text-transform:uppercase}
+    table.rc-info{width:100%;border-collapse:collapse;margin:10px 0;font-size:11px}
+    table.rc-info td{padding:5px 8px;border:1px solid #e2e8f0}
+    table.rc-info td.l{font-weight:800;color:#6b7a99;background:#f8faff;width:18%}
+    table.rc-info td.v{font-weight:700;color:#1a3a6b}
+    table.rc-marks{width:100%;border-collapse:collapse;font-size:10px;border:1.5px solid #1a3a6b}
+    table.rc-marks th{background:#1a3a6b;color:white;padding:6px 6px;text-align:center;font-size:9px;text-transform:uppercase}
+    table.rc-marks td{padding:9px 6px;text-align:center;border-bottom:1px solid #e2e8f0}
+    table.rc-marks tr:nth-child(even) td{background:#f8faff}
+    .rc-resbar{display:flex;justify-content:space-around;background:#f8faff;border:1px solid #d0dbe8;border-radius:6px;padding:8px;margin-top:10px}
+    .rc-resbar .l{font-size:8px;color:#6b7a99;font-weight:800;text-transform:uppercase;text-align:center}
+    .rc-resbar .v{font-size:15px;font-weight:900;color:#1a3a6b;text-align:center;margin-top:2px;border-bottom:1px solid #94a3b8;min-height:20px}
+    .rc-remarks{display:flex;gap:8px;margin-top:10px}
+    .rc-remarks>div{flex:1;border:1px solid #d0dbe8;border-radius:6px;padding:6px 8px}
+    .rc-remarks .l{font-size:8px;color:#6b7a99;font-weight:800;text-transform:uppercase}
+    .rc-remarks .txt{font-size:10px;font-weight:600;margin-top:3px;line-height:1.4}
+    .rc-sigrow{display:flex;justify-content:space-between;padding:20px 10px 4px;font-size:10px;color:#6b7a99;text-align:center}
+    .rc-sigrow .line{border-top:1.5px solid #1a3a6b;width:100px;margin:0 auto 4px}
+    .rc-footer{text-align:center;margin-top:8px;padding-top:6px;border-top:1px solid #e2e8f0;font-size:8.5px;color:#9aa8c0}
+  `;
+}
+function printBlankReportCards(cls){
+  cls = cls || document.getElementById('rcClass')?.value;
+  if(!cls){ toast('Select a class first','error'); return; }
+  const session=getActiveSession();
+  const students=(ls('students')||[]).filter(s=>s.session===session&&s.class===cls).sort((a,b)=>a.roll-b.roll);
+  if(!students.length){ toast('No students found for this class','error'); return; }
+  const subjects=getExamRegisterSubjectNames(cls)||[];
+  const terms=['Term 1','Term 2','Term 3'];
+  const cards=students.map(s=>blankReportCardHTML(s,session,subjects,terms)).join('');
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>Blank Report Cards — ${esc(cls)}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
+  <style>${reportCardPrintCSS()}</style></head><body>
+    <div class="no-print"><button onclick="window.print()">🖨️ Print All</button></div>
+    ${cards}</body></html>`);
+  w.document.close();
+}
+// A single, entirely blank template (no student tied) — for when even the
+// class roster isn't available and copies just need to be run off and
+// filled in completely by hand.
+function printBlankReportCardTemplate(){
+  const session=getActiveSession();
+  const terms=['Term 1','Term 2','Term 3'];
+  const card=blankReportCardHTML(null,session,[],terms);
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>Blank Report Card Template</title>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
+  <style>${reportCardPrintCSS()}</style></head><body>
+    <div class="no-print"><button onclick="window.print()">🖨️ Print (set copies in the print dialog)</button></div>
+    ${card}</body></html>`);
+  w.document.close();
 }
 
 function printAllReportCards(cls){
@@ -7552,38 +7677,7 @@ function printAllReportCards(cls){
   }).join('');
   w.document.write(`<!DOCTYPE html><html><head><title>Report Cards — ${cls}</title>
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
-  <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:'Nunito',sans-serif;color:#1a2740}
-    @media print{.no-print{display:none}}
-    .no-print{margin:10px}
-    .no-print button{padding:10px 24px;background:#1a3a6b;color:white;border:none;border-radius:8px;font-size:13px;cursor:pointer}
-    .rc-page{page-break-after:always;padding:14mm 14mm;border:2.5px solid #1a3a6b;border-radius:8px;margin:8px;font-size:11px}
-    .rc-top{display:flex;align-items:center;gap:10px;background:linear-gradient(135deg,#0d1f3c,#2456a4);padding:10px 14px;border-radius:6px;color:white;margin-bottom:0}
-    .rc-logo{width:44px;height:44px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:3px}
-    .rc-logo img{width:100%;height:100%;object-fit:contain}
-    .rc-sname{font-family:'Playfair Display',serif;font-size:15px;font-weight:800}
-    .rc-saddr{font-size:9px;color:rgba(255,255,255,.7);margin-top:1px}
-    .rc-titlebar{background:linear-gradient(90deg,#7c5c0a,#c9a84c,#f0c040,#c9a84c,#7c5c0a);padding:5px;text-align:center;font-size:11px;font-weight:900;color:#1a2740;letter-spacing:2px;text-transform:uppercase}
-    table.rc-info{width:100%;border-collapse:collapse;margin:10px 0;font-size:11px}
-    table.rc-info td{padding:5px 8px;border:1px solid #e2e8f0}
-    table.rc-info td.l{font-weight:800;color:#6b7a99;background:#f8faff;width:18%}
-    table.rc-info td.v{font-weight:700;color:#1a3a6b}
-    table.rc-marks{width:100%;border-collapse:collapse;font-size:10px;border:1.5px solid #1a3a6b}
-    table.rc-marks th{background:#1a3a6b;color:white;padding:6px 6px;text-align:center;font-size:9px;text-transform:uppercase}
-    table.rc-marks td{padding:5px 6px;text-align:center;border-bottom:1px solid #e2e8f0}
-    table.rc-marks tr:nth-child(even) td{background:#f8faff}
-    .rc-resbar{display:flex;justify-content:space-around;background:#f8faff;border:1px solid #d0dbe8;border-radius:6px;padding:8px;margin-top:10px}
-    .rc-resbar .l{font-size:8px;color:#6b7a99;font-weight:800;text-transform:uppercase;text-align:center}
-    .rc-resbar .v{font-size:15px;font-weight:900;color:#1a3a6b;text-align:center;margin-top:2px}
-    .rc-remarks{display:flex;gap:8px;margin-top:10px}
-    .rc-remarks>div{flex:1;border:1px solid #d0dbe8;border-radius:6px;padding:6px 8px}
-    .rc-remarks .l{font-size:8px;color:#6b7a99;font-weight:800;text-transform:uppercase}
-    .rc-remarks .txt{font-size:10px;font-weight:600;margin-top:3px;line-height:1.4}
-    .rc-sigrow{display:flex;justify-content:space-between;padding:20px 10px 4px;font-size:10px;color:#6b7a99;text-align:center}
-    .rc-sigrow .line{border-top:1.5px solid #1a3a6b;width:100px;margin:0 auto 4px}
-    .rc-footer{text-align:center;margin-top:8px;padding-top:6px;border-top:1px solid #e2e8f0;font-size:8.5px;color:#9aa8c0}
-  </style></head><body>
+  <style>${reportCardPrintCSS()}</style></head><body>
     <div class="no-print"><button onclick="window.print()">🖨️ Print All</button></div>
     ${cards}</body></html>`);
   w.document.close();
@@ -15778,6 +15872,7 @@ function openStudentProfile(id){
     <button class="tab" onclick="switchProfileTab('pfTxn',this)">💳 Transactions</button>
     <button class="tab" onclick="switchProfileTab('pfGov',this)">🏛 Government Record</button>
     <button class="tab" onclick="switchProfileTab('pfTC',this)">📄 Transfer Certificate</button>
+    <button class="tab" onclick="switchProfileTab('pfContinuation',this)">🎒 Continuation</button>
   </div>
   </div>
 
@@ -16006,6 +16101,48 @@ function openStudentProfile(id){
   <div id="pfTxn" style="display:none">
     <div style="font-weight:800;color:var(--primary);margin-bottom:8px;margin-top:4px">💳 Transaction History</div>
     ${renderFullFinancialHistory(id)}
+  </div>
+
+  <!-- STUDENT CONTINUATION & FOLLOW-UP TAB -->
+  <div id="pfContinuation" style="display:none">
+    ${(()=>{
+      const cFlags=computeContinuationFlags(id);
+      const cStatus=getContinuationStatus(s);
+      const cMeta=CONTINUATION_STATUSES[cStatus];
+      const cHistory=getContinuationFollowUps(id);
+      const cTeacher=getClassTeacherMap()[s.class]||'—';
+      return `
+      <div class="card" style="padding:14px 16px;margin-bottom:14px;border-left:5px solid ${cMeta.color}">
+        <div class="card-title" style="padding:0;margin-bottom:10px"><i class="fas fa-user-clock"></i> Student Continuation &amp; Follow-Up</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;font-size:12.5px">
+          <div><div class="text-xs text-muted">Current Status</div><span class="badge" style="background:${cMeta.bg};color:${cMeta.color}">${esc(cStatus)}</span></div>
+          <div><div class="text-xs text-muted">Last Present Date</div><strong>${cFlags.lastPresentDate?fmtDate(cFlags.lastPresentDate):'—'}</strong></div>
+          <div><div class="text-xs text-muted">Consecutive Absent</div><strong style="color:${cFlags.consecutiveAbsent>0?'#dc2626':'inherit'}">${cFlags.consecutiveAbsent||0} day(s)</strong></div>
+          <div><div class="text-xs text-muted">Attendance %</div><strong>${cFlags.attendancePct??'—'}${cFlags.attendancePct!==null?'%':''}</strong></div>
+          <div><div class="text-xs text-muted">Assigned Class Teacher</div><strong>${esc(cTeacher)}</strong></div>
+          <div><div class="text-xs text-muted">Reason</div><strong>${esc(s.continuationReason||'—')}${s.continuationReason==='Other'&&s.continuationReasonNote?': '+esc(s.continuationReasonNote):''}</strong></div>
+          <div><div class="text-xs text-muted">Last Follow-Up</div><strong>${cHistory[0]?fmtDate(cHistory[0].createdAt):'—'}</strong></div>
+          <div><div class="text-xs text-muted">Next Follow-Up Due</div><strong>${cHistory.find(f=>f.nextFollowUpDate)?fmtDate(cHistory.find(f=>f.nextFollowUpDate).nextFollowUpDate):'—'}</strong></div>
+        </div>
+        ${cFlags.alertLevel?`<div class="text-sm" style="margin-top:10px;background:#fef2f2;color:#991b1b;padding:8px 10px;border-radius:8px">⚠️ ${cFlags.alertLevel} — based on ${cFlags.consecutiveAbsent} consecutive absent day(s)</div>`:''}
+        ${cStatus==='Transferred / TC Taken'&&getStudentTCs(id)[0]?(()=>{const tc=getStudentTCs(id)[0];return `<div class="text-sm" style="margin-top:10px;background:#f1f5f9;color:#334155;padding:8px 10px;border-radius:8px">📄 TC Status: <strong>${esc((TC_STATUS_META[tc.status]&&TC_STATUS_META[tc.status].label)||tc.status||'—')}</strong> &bull; Date: ${tc.dateOfLeaving?fmtDate(tc.dateOfLeaving):'—'} &bull; Reason: ${esc(tc.reasonForLeaving==='Other'?(tc.reasonOther||'Other'):(tc.reasonForLeaving||'—'))}${tc.destinationSchool?' &bull; Destination: '+esc(tc.destinationSchool):''}</div>`;})():''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">
+          <button class="btn btn-sm btn-primary" onclick="openAddContinuationFollowUp('${id}')"><i class="fas fa-comment-medical"></i> Add Follow-Up</button>
+          ${s.phone?`<button class="btn btn-sm btn-success" onclick="openContinuationWhatsApp('${id}')"><i class="fab fa-whatsapp"></i> WhatsApp Parent</button>
+          <a class="btn btn-sm btn-outline" href="tel:${esc(s.phone)}"><i class="fas fa-phone"></i> Call Parent</a>`:''}
+          <button class="btn btn-sm btn-outline" onclick="openChangeContinuationStatus('${id}')"><i class="fas fa-edit"></i> Change Status</button>
+          <button class="btn btn-sm btn-outline" onclick="viewContinuationHistory('${id}')"><i class="fas fa-history"></i> Follow-Up History</button>
+          <button class="btn btn-sm btn-outline" onclick="printStudentContinuationReport('${id}')"><i class="fas fa-print"></i> Print Report</button>
+        </div>
+      </div>
+      <div style="font-weight:800;color:var(--primary);margin-bottom:8px">📋 Recent Follow-Ups</div>
+      ${cHistory.length?cHistory.slice(0,5).map(f=>`
+        <div style="padding:8px 10px;background:#f8faff;border-radius:8px;margin-bottom:6px;font-size:12px">
+          <strong>${fmtDate(f.createdAt)}</strong> — ${esc(f.followedBy||'—')} (${esc(f.contactMethod||'—')})
+          ${f.actionTaken?`<div class="text-muted">${esc(f.actionTaken)}</div>`:''}
+        </div>`).join(''):'<div class="text-muted text-sm">No follow-up records yet</div>'}
+      `;
+    })()}
   </div>
   `,[
     {label:'🖨️ Print Profile',cls:'btn-primary',onclick:`printStudentProfile('${id}')`},
@@ -17026,15 +17163,20 @@ function switchNaTab(tabId, btn){
 }
 
 function getAttentionSettings(){
-  return Object.assign({criticalPct:40,attentionPct:50,subjectMinPct:40,declineThreshold:10}, ls('attentionSettings')||{});
+  return Object.assign({criticalPct:40,attentionPct:50,subjectMinPct:40,declineThreshold:10,
+    attentionDays:3,followUpDays:7,principalReviewDays:15}, ls('attentionSettings')||{});
 }
 function saveAttentionSettings(){
   const critical=parseInt(document.getElementById('asCritical')?.value)||40;
   const attention=parseInt(document.getElementById('asAttention')?.value)||50;
   const subjMin=parseInt(document.getElementById('asSubjMin')?.value)||40;
   const decline=parseInt(document.getElementById('asDecline')?.value)||10;
-  ss('attentionSettings',{criticalPct:critical,attentionPct:attention,subjectMinPct:subjMin,declineThreshold:decline});
-  toast('✅ Academic attention thresholds saved!');
+  const attnDays=parseInt(document.getElementById('asAttnDays')?.value)||3;
+  const followDays=parseInt(document.getElementById('asFollowDays')?.value)||7;
+  const reviewDays=parseInt(document.getElementById('asReviewDays')?.value)||15;
+  ss('attentionSettings',{criticalPct:critical,attentionPct:attention,subjectMinPct:subjMin,declineThreshold:decline,
+    attentionDays:attnDays,followUpDays:followDays,principalReviewDays:reviewDays});
+  toast('✅ Attention thresholds saved!');
 }
 
 // Which term is "furthest along" (has any data anywhere this session) — used to spot missing marks
@@ -17190,6 +17332,505 @@ function getClassWiseAttentionSummary(session){
 }
 
 // ── Page: Students Need Attention ──
+
+// ═══════════════════════════════════════════════════════════════════════
+//  🎒 STUDENT CONTINUATION & FOLLOW-UP
+//  A second, separate lens on "attention" from the academic one above —
+//  this one is about ATTENDANCE/continuation (students who stop coming),
+//  not marks. Kept as its own page (not merged into "Students Need
+//  Attention") because the two trigger on completely different data
+//  (consecutive absences vs exam %) and mixing them would make both
+//  confusing — but it reuses the SAME studentFollowUps array (tagged
+//  category:'attendance') and the SAME attentionSettings store (extended
+//  above) rather than creating parallel data stores. Both pages cross-link
+//  to each other at the top.
+// ═══════════════════════════════════════════════════════════════════════
+const CONTINUATION_STATUSES={
+  'Active':                    {color:'#15803d',bg:'#dcfce7'},
+  'Irregular Attendance':      {color:'#a16207',bg:'#fef9c3'},
+  'Long Absent':               {color:'#c2410c',bg:'#ffedd5'},
+  'Temporarily Not Attending': {color:'#1d4ed8',bg:'#dbeafe'},
+  'Follow-Up Required':        {color:'#dc2626',bg:'#fee2e2'},
+  'Discontinued':              {color:'#4b5563',bg:'#f1f5f9'},
+  'Transferred / TC Taken':    {color:'#4b5563',bg:'#f1f5f9'},
+  'Reason Unknown':            {color:'#7e22ce',bg:'#f3e8ff'}
+};
+const CONTINUATION_REASONS=['Too far from home','Transport problem','Financial difficulty','Student does not want to attend','Health/personal reason','Family problem','Changed residence','Joined another school','Parent stopped sending','School-related concern','Reason unknown','Other'];
+const CONTACT_METHODS=['Phone','WhatsApp','In Person','Written Notice','Other'];
+// Statuses that only Principal/Admin may set (never auto-applied — see computeContinuationFlags)
+const CONTINUATION_PRINCIPAL_ONLY=['Discontinued','Transferred / TC Taken'];
+
+function getContinuationStatus(s){ return s.continuationStatus || 'Active'; }
+
+// Pure attendance-derived signal — NEVER writes to the student record and
+// NEVER sets Discontinued/Transferred on its own; it only suggests an
+// alert level so a human can decide the actual status.
+function computeContinuationFlags(studentId){
+  const att=(ls('attendance')||{})[studentId]||{};
+  const dates=Object.keys(att).sort();
+  const cfg=getAttentionSettings();
+  let presentDays=0;
+  dates.forEach(d=>{ if(att[d]==='present'||att[d]==='late') presentDays++; });
+  const attendancePct = dates.length ? Math.round(presentDays/dates.length*100) : null;
+  let consecutiveAbsent=0, lastPresentDate=null;
+  for(let i=dates.length-1;i>=0;i--){
+    if(att[dates[i]]==='absent') consecutiveAbsent++;
+    else { lastPresentDate=dates[i]; break; }
+  }
+  let alertLevel=null;
+  if(consecutiveAbsent>=cfg.principalReviewDays) alertLevel='Principal Review';
+  else if(consecutiveAbsent>=cfg.followUpDays) alertLevel='Follow-Up Required';
+  else if(consecutiveAbsent>=cfg.attentionDays) alertLevel='Attention';
+  return {attendancePct, consecutiveAbsent, lastPresentDate, totalRecordedDays:dates.length, alertLevel};
+}
+function needsContinuationAttention(s,flags){
+  const status=getContinuationStatus(s);
+  return !!flags.alertLevel
+    || ['Irregular Attendance','Long Absent','Follow-Up Required','Temporarily Not Attending','Reason Unknown'].includes(status);
+}
+function getStudentsNeedingContinuation(session,classFilter){
+  const students=(ls('students')||[]).filter(s=>s.session===session && (!classFilter||classFilter==='All'||s.class===classFilter));
+  const out=[];
+  students.forEach(s=>{
+    const flags=computeContinuationFlags(s.id);
+    if(needsContinuationAttention(s,flags)) out.push({student:s, flags});
+  });
+  return out;
+}
+function getClassWiseContinuationSummary(session){
+  const classes=getAllClasses();
+  const students=(ls('students')||[]).filter(s=>s.session===session);
+  return classes.map(cls=>{
+    const clsStudents=students.filter(s=>s.class===cls);
+    const counts={};
+    clsStudents.forEach(s=>{ const st=getContinuationStatus(s); counts[st]=(counts[st]||0)+1; });
+    return {cls, total:clsStudents.length,
+      active:counts['Active']||0, irregular:counts['Irregular Attendance']||0,
+      longAbsent:counts['Long Absent']||0, followUp:counts['Follow-Up Required']||0,
+      tempNot:counts['Temporarily Not Attending']||0, discontinued:counts['Discontinued']||0};
+  }).filter(c=>c.total>0);
+}
+function getContinuationFollowUps(studentId){
+  return (ls('studentFollowUps')||[]).filter(f=>f.category==='attendance'&&f.studentId===studentId)
+    .sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+}
+function getContinuationTasksForTeacher(teacherId){
+  return (ls('studentFollowUps')||[]).filter(f=>f.category==='attendance'&&f.assignedToTeacherId===teacherId&&f.taskStatus==='Pending');
+}
+
+function renderContinuation(){
+  const session=getActiveSession();
+  const isTeacherRole=currentUser&&currentUser.role==='teacher';
+  const teacherObjC=isTeacherRole?(ls('teachers')||[]).find(x=>x.id===currentUser.id||x.id===currentUser.teacherId):null;
+  const myClasses=teacherObjC?.classes||[];
+  const classes=isTeacherRole?myClasses:getAllClasses();
+  const classSummary=isTeacherRole?[]:getClassWiseContinuationSummary(session);
+  const myTasks=isTeacherRole?getContinuationTasksForTeacher(currentUser.teacherId||currentUser.id):[];
+  return `
+  <div class="section-header">
+    <div class="section-title"><i class="fas fa-user-clock" style="color:var(--danger)"></i> Student Continuation &amp; Follow-Up</div>
+    <div class="flex gap-8 no-print">
+      <button class="btn btn-outline btn-sm" onclick="showPage('needAttention')"><i class="fas fa-chart-line"></i> Academic Attention</button>
+      ${!isTeacherRole?`<button class="btn btn-outline btn-sm" onclick="openAttentionSettingsModal()"><i class="fas fa-sliders-h"></i> Thresholds</button>
+      <button class="btn btn-outline btn-sm" onclick="printContinuationReport()"><i class="fas fa-print"></i> Print Report</button>`:''}
+    </div>
+  </div>
+
+  ${isTeacherRole&&myTasks.length?`
+  <div class="card" style="margin-bottom:16px;background:#fff7ed;border:1.5px solid #fed7aa">
+    <div class="card-title"><i class="fas fa-tasks" style="color:#c2410c"></i> My Follow-Up Tasks (${myTasks.length})</div>
+    ${myTasks.map(f=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#fff;border-radius:8px;margin-bottom:6px;flex-wrap:wrap;gap:8px">
+        <div>
+          <strong>${esc(f.studentName)}</strong> <span class="text-xs text-muted">— ${esc(f.className)}</span>
+          <div class="text-xs" style="color:${f.priority==='Urgent'?'#dc2626':f.priority==='Important'?'#c2410c':'#64748b'}">Priority: ${f.priority||'Normal'} ${f.dueDate?'&bull; Due '+esc(fmtDate(f.dueDate)):''}</div>
+        </div>
+        <button class="btn btn-xs btn-success" onclick="openAddContinuationFollowUp('${f.studentId}','${f.id}')"><i class="fas fa-check"></i> Complete</button>
+      </div>`).join('')}
+  </div>`:''}
+
+  ${!isTeacherRole&&classSummary.length?`
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title"><i class="fas fa-layer-group"></i> Class-wise Summary</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+      ${classSummary.map(c=>`
+        <div style="padding:12px;background:#f8faff;border-radius:10px;border:1px solid var(--border);cursor:pointer" onclick="document.getElementById('coClassFilter').value='${esc(c.cls)}';refreshContinuationList()">
+          <div style="font-weight:900;color:var(--primary);margin-bottom:6px">${esc(c.cls)} <span class="text-xs text-muted">(${c.total})</span></div>
+          <div class="text-xs text-muted">🟢 Active: <strong>${c.active}</strong></div>
+          <div class="text-xs text-muted">🟡 Irregular: <strong>${c.irregular}</strong></div>
+          <div class="text-xs text-muted">🟠 Long Absent: <strong>${c.longAbsent}</strong></div>
+          <div class="text-xs text-muted">🔴 Follow-Up Required: <strong>${c.followUp}</strong></div>
+          <div class="text-xs text-muted">🔵 Temp. Not Attending: <strong>${c.tempNot}</strong></div>
+          <div class="text-xs text-muted">⚫ Discontinued: <strong>${c.discontinued}</strong></div>
+        </div>
+      `).join('')}
+    </div>
+  </div>`:''}
+
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
+      <div class="form-group" style="margin:0"><label>Class</label>
+        <select id="coClassFilter" onchange="refreshContinuationList()" style="width:100%;padding:9px;border:2px solid var(--border);border-radius:8px">
+          <option value="All">All Classes</option>
+          ${classes.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group" style="margin:0"><label>Status</label>
+        <select id="coStatusFilter" onchange="refreshContinuationList()" style="width:100%;padding:9px;border:2px solid var(--border);border-radius:8px">
+          <option value="All">All</option>
+          ${Object.keys(CONTINUATION_STATUSES).map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group" style="margin:0"><label>Attendance %</label>
+        <select id="coAttFilter" onchange="refreshContinuationList()" style="width:100%;padding:9px;border:2px solid var(--border);border-radius:8px">
+          <option value="All">All</option>
+          <option value="below50">Below 50%</option>
+          <option value="below75">Below 75%</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin:0"><label>Search</label>
+        <input type="text" id="coSearch" placeholder="Name / ID / Roll / Phone" oninput="refreshContinuationList()" style="width:100%;padding:9px;border:2px solid var(--border);border-radius:8px">
+      </div>
+    </div>
+  </div>
+
+  <div id="coListContainer">${renderContinuationListHTML(session,'All','All','All','',isTeacherRole?myClasses:null)}</div>`;
+}
+function refreshContinuationList(){
+  const session=getActiveSession();
+  const cls=document.getElementById('coClassFilter')?.value||'All';
+  const status=document.getElementById('coStatusFilter')?.value||'All';
+  const attFilter=document.getElementById('coAttFilter')?.value||'All';
+  const q=(document.getElementById('coSearch')?.value||'').toLowerCase().trim();
+  const isTeacherRole=currentUser&&currentUser.role==='teacher';
+  let restrictClasses=null;
+  if(isTeacherRole){
+    const teacherObjC=(ls('teachers')||[]).find(x=>x.id===currentUser.id||x.id===currentUser.teacherId);
+    restrictClasses=teacherObjC?.classes||[];
+  }
+  const el=document.getElementById('coListContainer');
+  if(el) el.innerHTML=renderContinuationListHTML(session,cls,status,attFilter,q,restrictClasses);
+}
+function renderContinuationListHTML(session,classFilter,statusFilter,attFilter,q,restrictClasses){
+  let items=getStudentsNeedingContinuation(session, classFilter==='All'?null:classFilter);
+  // Also include students whose status was explicitly set but who no longer
+  // trigger an attendance alert (e.g. Discontinued students with old records)
+  if(statusFilter!=='All'){
+    const already=new Set(items.map(x=>x.student.id));
+    (ls('students')||[]).filter(s=>s.session===session&&(classFilter==='All'||s.class===classFilter)&&getContinuationStatus(s)===statusFilter&&!already.has(s.id))
+      .forEach(s=>items.push({student:s, flags:computeContinuationFlags(s.id)}));
+    items=items.filter(x=>getContinuationStatus(x.student)===statusFilter);
+  }
+  if(restrictClasses) items=items.filter(x=>restrictClasses.includes(x.student.class));
+  if(attFilter==='below50') items=items.filter(x=>x.flags.attendancePct!==null&&x.flags.attendancePct<50);
+  if(attFilter==='below75') items=items.filter(x=>x.flags.attendancePct!==null&&x.flags.attendancePct<75);
+  if(q) items=items.filter(x=>{
+    const s=x.student;
+    return s.name.toLowerCase().includes(q)||String(s.roll||'').includes(q)||(s.studentId||'').toLowerCase().includes(q)||(s.phone||'').includes(q);
+  });
+  items.sort((a,b)=>(b.flags.consecutiveAbsent||0)-(a.flags.consecutiveAbsent||0));
+  if(!items.length) return emptyState('✅','No students need attendance follow-up','Everyone in this view is attending regularly');
+  const classTeacherMap=getClassTeacherMap();
+  return items.map(({student:s,flags})=>{
+    const status=getContinuationStatus(s);
+    const meta=CONTINUATION_STATUSES[status];
+    const lastFU=getContinuationFollowUps(s.id)[0];
+    return `
+    <div class="card" style="padding:14px 16px;margin-bottom:10px;border-left:5px solid ${meta.color}">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div>
+          <div style="font-weight:900;color:#1a3a6b;font-size:15px">${esc(s.name)} <span class="text-xs text-muted">— ${esc(s.class)}, Roll ${s.roll||'—'}</span></div>
+          <div class="text-sm text-muted">ID: ${esc(s.studentId||'—')} &bull; Phone: ${esc(s.phone||'—')} &bull; Teacher: ${esc(classTeacherMap[s.class]||'—')}</div>
+          <div class="text-sm" style="margin-top:4px">
+            ${flags.attendancePct!==null?`Attendance: <strong>${flags.attendancePct}%</strong> &bull; `:''}
+            Last Present: <strong>${flags.lastPresentDate?fmtDate(flags.lastPresentDate):'—'}</strong>
+            ${flags.consecutiveAbsent>0?` &bull; <strong style="color:#dc2626">${flags.consecutiveAbsent} consecutive absent day(s)</strong>`:''}
+          </div>
+          ${s.continuationReason?`<div class="text-xs text-muted" style="margin-top:2px">Reason: ${esc(s.continuationReason)}${s.continuationReason==='Other'&&s.continuationReasonNote?': '+esc(s.continuationReasonNote):''}</div>`:''}
+          ${lastFU?`<div class="text-xs text-muted">Last follow-up: ${fmtDate(lastFU.createdAt)} by ${esc(lastFU.followedBy||'—')}</div>`:''}
+        </div>
+        <div style="text-align:right">
+          <span class="badge" style="background:${meta.bg};color:${meta.color}">${esc(status)}</span>
+          ${flags.alertLevel?`<div class="text-xs" style="color:#dc2626;margin-top:4px;font-weight:700">⚠️ ${flags.alertLevel}</div>`:''}
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px" class="no-print">
+        <button class="btn btn-xs btn-primary" onclick="openAddContinuationFollowUp('${s.id}')"><i class="fas fa-comment-medical"></i> Add Follow-Up</button>
+        ${s.phone?`<button class="btn btn-xs btn-success" onclick="openContinuationWhatsApp('${s.id}')"><i class="fab fa-whatsapp"></i> WhatsApp</button>
+        <a class="btn btn-xs btn-outline" href="tel:${esc(s.phone)}"><i class="fas fa-phone"></i> Call</a>`:''}
+        <button class="btn btn-xs btn-outline" onclick="openChangeContinuationStatus('${s.id}')"><i class="fas fa-edit"></i> Change Status</button>
+        <button class="btn btn-xs btn-outline" onclick="viewContinuationHistory('${s.id}')"><i class="fas fa-history"></i> History</button>
+        <button class="btn btn-xs btn-outline" onclick="printStudentContinuationReport('${s.id}')"><i class="fas fa-print"></i> Print</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Change Status ──
+function openChangeContinuationStatus(studentId){
+  const s=(ls('students')||[]).find(x=>x.id===studentId);
+  if(!s) return;
+  const isPrincipal=currentUser.role==='principal';
+  const status=getContinuationStatus(s);
+  openModal(`Change Status — ${esc(s.name)}`,`
+    <div class="form-group"><label>Continuation Status</label>
+      <select id="ccsStatus" onchange="document.getElementById('ccsReasonWrap').style.display=this.value==='Active'?'none':'block'" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px">
+        ${Object.keys(CONTINUATION_STATUSES).map(st=>{
+          const disabled = CONTINUATION_PRINCIPAL_ONLY.includes(st) && !isPrincipal;
+          return `<option value="${esc(st)}" ${st===status?'selected':''} ${disabled?'disabled':''}>${esc(st)}${disabled?' (Principal only)':''}</option>`;
+        }).join('')}
+      </select>
+    </div>
+    <div id="ccsReasonWrap" style="display:${status==='Active'?'none':'block'}">
+      <div class="form-group"><label>Reason for Non-Attendance</label>
+        <select id="ccsReason" onchange="document.getElementById('ccsReasonOtherWrap').style.display=this.value==='Other'?'block':'none'" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px">
+          <option value="">— Select —</option>
+          ${CONTINUATION_REASONS.map(r=>`<option value="${esc(r)}" ${s.continuationReason===r?'selected':''}>${esc(r)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group" id="ccsReasonOtherWrap" style="display:${s.continuationReason==='Other'?'block':'none'}">
+        <label>Custom Reason</label>
+        <input id="ccsReasonNote" value="${esc(s.continuationReasonNote||'')}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px">
+      </div>
+    </div>
+    <div class="form-group"><label>Additional Notes</label>
+      <textarea id="ccsNotes" rows="3" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit"></textarea>
+    </div>
+  `,[
+    {label:'Save Status',cls:'btn-primary',onclick:`saveContinuationStatus('${studentId}')`},
+    {label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}
+  ]);
+}
+function saveContinuationStatus(studentId){
+  const students=ls('students')||[];
+  const idx=students.findIndex(x=>x.id===studentId);
+  if(idx<0) return;
+  const status=document.getElementById('ccsStatus').value;
+  if(CONTINUATION_PRINCIPAL_ONLY.includes(status) && currentUser.role!=='principal'){
+    toast('Only the Principal can set this status','error'); return;
+  }
+  const reason=document.getElementById('ccsReason')?.value||'';
+  const reasonNote=document.getElementById('ccsReasonNote')?.value||'';
+  const notes=document.getElementById('ccsNotes')?.value||'';
+  const prevStatus=getContinuationStatus(students[idx]);
+  students[idx]={...students[idx],
+    continuationStatus:status, continuationReason:status==='Active'?'':reason,
+    continuationReasonNote:reason==='Other'?reasonNote:'',
+    continuationUpdatedAt:new Date().toISOString(), continuationUpdatedBy:currentUser.name};
+  ss('students',students);
+  // Status changes are logged as a follow-up record too, so history is never lost
+  const followUps=ls('studentFollowUps')||[];
+  followUps.push({id:uid(), category:'attendance', studentId, studentName:students[idx].name, className:students[idx].class, session:students[idx].session,
+    createdAt:new Date().toISOString(), followedBy:currentUser.name, followedByRole:currentUser.role,
+    contactMethod:'Other', reason, reasonNote, actionTaken:`Status changed: ${prevStatus} → ${status}`,
+    parentResponse:'', nextFollowUpDate:'', notes, taskStatus:null});
+  ss('studentFollowUps',followUps);
+  toast('✅ Status updated');
+  closeModal();
+  if(document.getElementById('coListContainer')) refreshContinuationList();
+}
+
+// ── Add Follow-Up (optionally completes an assigned task, taskId passed in) ──
+function openAddContinuationFollowUp(studentId,taskId){
+  const s=(ls('students')||[]).find(x=>x.id===studentId);
+  if(!s) return;
+  const isPrincipal=currentUser.role==='principal';
+  const teachers=getTeachingStaff();
+  openModal(`Add Follow-Up — ${esc(s.name)}`,`
+    <div class="form-row">
+      <div class="form-group"><label>Contact Method</label>
+        <select id="afContactMethod" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px">
+          ${CONTACT_METHODS.map(m=>`<option>${m}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Next Follow-Up Date</label>
+        <input id="afNextDate" type="date" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px">
+      </div>
+    </div>
+    <div class="form-group"><label>Reason (if known)</label>
+      <select id="afReason" onchange="document.getElementById('afReasonOtherWrap').style.display=this.value==='Other'?'block':'none'" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px">
+        <option value="">— Not specified —</option>
+        ${CONTINUATION_REASONS.map(r=>`<option>${r}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group" id="afReasonOtherWrap" style="display:none"><label>Custom Reason</label>
+      <input id="afReasonNote" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px">
+    </div>
+    <div class="form-group"><label>Parent Response</label>
+      <textarea id="afParentResponse" rows="2" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit"></textarea>
+    </div>
+    <div class="form-group"><label>Action Taken</label>
+      <textarea id="afAction" rows="2" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit"></textarea>
+    </div>
+    <div class="form-group"><label>Notes</label>
+      <textarea id="afNotes" rows="2" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit"></textarea>
+    </div>
+    ${isPrincipal&&!taskId?`
+    <div class="form-group" style="background:#f8faff;border-radius:8px;padding:10px">
+      <label>Assign as a task to a teacher (optional)</label>
+      <select id="afAssignTeacher" style="width:100%;padding:9px;border:2px solid var(--border);border-radius:8px;margin-bottom:8px">
+        <option value="">— Don't assign —</option>
+        ${teachers.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}
+      </select>
+      <div class="form-row">
+        <div class="form-group" style="margin:0"><label>Due Date</label><input id="afDueDate" type="date" style="width:100%;padding:9px;border:2px solid var(--border);border-radius:8px"></div>
+        <div class="form-group" style="margin:0"><label>Priority</label>
+          <select id="afPriority" style="width:100%;padding:9px;border:2px solid var(--border);border-radius:8px"><option>Normal</option><option>Important</option><option>Urgent</option></select>
+        </div>
+      </div>
+    </div>`:''}
+  `,[
+    {label:taskId?'Complete Task':'Save Follow-Up',cls:'btn-primary',onclick:`saveContinuationFollowUp('${studentId}','${taskId||''}')`},
+    {label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}
+  ]);
+}
+function saveContinuationFollowUp(studentId,taskId){
+  const s=(ls('students')||[]).find(x=>x.id===studentId);
+  if(!s) return;
+  const contactMethod=document.getElementById('afContactMethod').value;
+  const nextFollowUpDate=document.getElementById('afNextDate').value;
+  const reason=document.getElementById('afReason').value;
+  const reasonNote=document.getElementById('afReasonNote')?.value||'';
+  const parentResponse=document.getElementById('afParentResponse').value;
+  const actionTaken=document.getElementById('afAction').value;
+  const notes=document.getElementById('afNotes').value;
+  const assignTeacherId=document.getElementById('afAssignTeacher')?.value||'';
+  const dueDate=document.getElementById('afDueDate')?.value||'';
+  const priority=document.getElementById('afPriority')?.value||'Normal';
+  const followUps=ls('studentFollowUps')||[];
+  if(taskId){
+    const idx=followUps.findIndex(f=>f.id===taskId);
+    if(idx>=0) followUps[idx]={...followUps[idx], taskStatus:'Completed', completedAt:new Date().toISOString(), completionNotes:notes};
+  }
+  followUps.push({id:uid(), category:'attendance', studentId, studentName:s.name, className:s.class, session:s.session,
+    createdAt:new Date().toISOString(), followedBy:currentUser.name, followedByRole:currentUser.role,
+    contactMethod, reason, reasonNote, parentResponse, actionTaken, nextFollowUpDate, notes,
+    assignedToTeacherId:assignTeacherId||null, dueDate:assignTeacherId?dueDate:null, priority:assignTeacherId?priority:null,
+    taskStatus:assignTeacherId?'Pending':null});
+  ss('studentFollowUps',followUps);
+  toast(taskId?'✅ Task completed':'✅ Follow-up saved');
+  closeModal();
+  if(document.getElementById('coListContainer')) refreshContinuationList();
+  if(document.getElementById('pfContinuation')) openStudentProfile(studentId);
+}
+function viewContinuationHistory(studentId){
+  const s=(ls('students')||[]).find(x=>x.id===studentId);
+  if(!s) return;
+  const history=getContinuationFollowUps(studentId);
+  openModal(`Follow-Up History — ${esc(s.name)}`,
+    history.length?history.map(f=>`
+    <div style="padding:10px 12px;background:#f8faff;border-radius:8px;margin-bottom:8px;font-size:13px">
+      <div style="font-weight:800;color:#1a3a6b">${fmtDate(f.createdAt)} <span class="text-xs text-muted" style="font-weight:400">${new Date(f.createdAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</span></div>
+      <div class="text-xs text-muted">By ${esc(f.followedBy||'—')} (${esc(f.followedByRole||'')}) &bull; ${esc(f.contactMethod||'—')}</div>
+      ${f.reason?`<div class="text-xs" style="margin-top:4px">Reason: ${esc(f.reason)}${f.reasonNote?': '+esc(f.reasonNote):''}</div>`:''}
+      ${f.actionTaken?`<div class="text-xs" style="margin-top:2px">Action: ${esc(f.actionTaken)}</div>`:''}
+      ${f.parentResponse?`<div class="text-xs" style="margin-top:2px">Parent response: ${esc(f.parentResponse)}</div>`:''}
+      ${f.notes?`<div class="text-xs" style="margin-top:2px;font-style:italic">"${esc(f.notes)}"</div>`:''}
+      ${f.nextFollowUpDate?`<div class="text-xs" style="margin-top:2px;color:#c2410c">Next follow-up: ${fmtDate(f.nextFollowUpDate)}</div>`:''}
+      ${f.assignedToTeacherId?`<div class="text-xs" style="margin-top:2px">Task: ${f.taskStatus} ${f.priority?'('+f.priority+')':''}</div>`:''}
+    </div>`).join(''):emptyState('📋','No follow-up records yet',''),
+    [{label:'Close',cls:'btn-outline',onclick:'closeModal()'}]
+  );
+}
+
+// ── WhatsApp templates ──
+const CONTINUATION_WA_TEMPLATES={
+  attendance:(s,f)=>`Dear Parent,\n\nYour child ${s.name} of Class ${s.class} has not been attending school regularly.\n\nLast attendance: ${f.lastPresentDate?fmtDate(f.lastPresentDate):'not recorded'}\n\nKindly let the school/class teacher know if there is any difficulty or reason for the absence.\n\nPlease contact the school and ensure regular attendance.\n\nThank you.\n\nChildren's Paradise School`,
+  longAbsence:(s,f)=>`Dear Parent,\n\nWe have noticed that ${s.name} of Class ${s.class} has been absent for ${f.consecutiveAbsent} consecutive school day(s).\n\nWe are concerned and would like to understand the reason.\n\nPlease contact the school office or class teacher at the earliest.\n\nThank you.\n\nChildren's Paradise School`,
+  contactRequired:(s)=>`Dear Parent,\n\nWe request you to contact ${'Children\u2019s Paradise School'} regarding ${s.name} (Class ${s.class}) at the earliest convenience.\n\nThank you.\n\nChildren's Paradise School`,
+  reasonRequired:(s)=>`Dear Parent,\n\nCould you kindly inform us of the reason for ${s.name}'s (Class ${s.class}) continued absence from school?\n\nThis will help us support your child better.\n\nThank you.\n\nChildren's Paradise School`,
+  followupReminder:(s,f)=>`Dear Parent,\n\nThis is a follow-up reminder regarding ${s.name} of Class ${s.class}.\n\n${f.lastPresentDate?'Last attendance: '+fmtDate(f.lastPresentDate)+'.\n\n':''}Please contact the school with an update.\n\nThank you.\n\nChildren's Paradise School`,
+  returning:(s)=>`Dear Parent,\n\nWe are glad to know ${s.name} of Class ${s.class} will be returning to school.\n\nPlease ensure regular attendance going forward. We're happy to help with anything needed for a smooth return.\n\nThank you.\n\nChildren's Paradise School`
+};
+function openContinuationWhatsApp(studentId){
+  const s=(ls('students')||[]).find(x=>x.id===studentId);
+  if(!s) return;
+  if(!s.phone){ toast('⚠️ Parent phone number not available — update it in Student Profile','error'); return; }
+  const flags=computeContinuationFlags(studentId);
+  openModal(`WhatsApp Parent — ${esc(s.name)}`,`
+    <div class="form-group"><label>Message Template</label>
+      <select id="waTemplate" onchange="document.getElementById('waMsgBox').value=CONTINUATION_WA_TEMPLATES[this.value](waStudentRef,waFlagsRef)" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px">
+        <option value="attendance">A. Attendance Reminder</option>
+        <option value="longAbsence">B. Long Absence Follow-Up</option>
+        <option value="contactRequired">C. Parent Contact Required</option>
+        <option value="reasonRequired">D. Reason Required</option>
+        <option value="followupReminder">E. Follow-Up Reminder</option>
+        <option value="returning">F. Student Returning to School</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Message (editable)</label>
+      <textarea id="waMsgBox" rows="9" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;font-family:inherit">${CONTINUATION_WA_TEMPLATES.attendance(s,flags)}</textarea>
+    </div>
+  `,[
+    {label:'📲 Send via WhatsApp',cls:'btn-success',onclick:`sendContinuationWhatsApp('${studentId}')`},
+    {label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}
+  ]);
+  window.waStudentRef=s; window.waFlagsRef=flags;
+}
+function sendContinuationWhatsApp(studentId){
+  const s=(ls('students')||[]).find(x=>x.id===studentId);
+  const msg=document.getElementById('waMsgBox').value;
+  window.open(`https://wa.me/91${s.phone}?text=${encodeURIComponent(msg)}`,'_blank');
+  closeModal();
+}
+
+// ── Print ──
+function printContinuationReport(){
+  const session=getActiveSession();
+  const cls=document.getElementById('coClassFilter')?.value||'All';
+  const students=(ls('students')||[]).filter(s=>s.session===session&&(cls==='All'||s.class===cls));
+  const classTeacherMap=getClassTeacherMap();
+  const rows=students.map(s=>({s,flags:computeContinuationFlags(s.id)}));
+  const needing=rows.filter(r=>needsContinuationAttention(r.s,r.flags)).length;
+  const pending=(ls('studentFollowUps')||[]).filter(f=>f.category==='attendance'&&f.session===session&&f.taskStatus==='Pending').length;
+  const body=`
+    ${schoolHeaderHTML(`Student Attendance &amp; Follow-Up Report`)}
+    <div style="font-size:11px;margin:8px 0 14px">Session: ${esc(session)} &nbsp;|&nbsp; Class: ${cls} &nbsp;|&nbsp; Report Date: ${fmtDate(today())} &nbsp;|&nbsp; Total Students: ${students.length} &nbsp;|&nbsp; Needing Attention: ${needing} &nbsp;|&nbsp; Follow-Up Pending: ${pending}</div>
+    <table style="width:100%;border-collapse:collapse;font-size:10.5px">
+      <thead><tr><th>Roll</th><th>Name</th><th>Phone</th><th>Att %</th><th>Last Present</th><th>Absent Days</th><th>Status</th><th>Reason</th><th>Teacher</th><th>Follow-Up</th></tr></thead>
+      <tbody>${rows.sort((a,b)=>(a.s.roll||0)-(b.s.roll||0)).map(({s,flags})=>{
+        const status=getContinuationStatus(s);
+        const lastFU=getContinuationFollowUps(s.id)[0];
+        return `<tr><td>${s.roll||'—'}</td><td>${esc(s.name)}</td><td>${esc(s.phone||'—')}</td><td>${flags.attendancePct??'—'}</td><td>${flags.lastPresentDate?fmtDate(flags.lastPresentDate):'—'}</td><td>${flags.consecutiveAbsent||0}</td><td>${esc(status)}</td><td>${esc(s.continuationReason||'—')}</td><td>${esc(classTeacherMap[s.class]||'—')}</td><td>${lastFU?fmtDate(lastFU.createdAt):'—'}</td></tr>`;
+      }).join('')}</tbody>
+    </table>
+    <div class="signatures" style="margin-top:30px">
+      <div class="sig-box"><div class="sig-line"></div>Class Teacher</div>
+      <div class="sig-box"><div class="sig-line"></div>Principal</div>
+    </div>`;
+  printWindow('Student Attendance & Follow-Up Report', body);
+}
+function printStudentContinuationReport(studentId){
+  const s=(ls('students')||[]).find(x=>x.id===studentId);
+  if(!s) return;
+  const flags=computeContinuationFlags(studentId);
+  const status=getContinuationStatus(s);
+  const history=getContinuationFollowUps(studentId);
+  const classTeacherMap=getClassTeacherMap();
+  const body=`
+    ${schoolHeaderHTML(`Student Attendance &amp; Follow-Up Report — ${esc(s.name)}`)}
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin:14px 0">
+      <tr><td style="padding:4px 8px;font-weight:700">Student</td><td style="padding:4px 8px">${esc(s.name)} (ID: ${esc(s.studentId||'—')})</td>
+          <td style="padding:4px 8px;font-weight:700">Class / Roll</td><td style="padding:4px 8px">${esc(s.class)} / ${s.roll||'—'}</td></tr>
+      <tr><td style="padding:4px 8px;font-weight:700">Attendance %</td><td style="padding:4px 8px">${flags.attendancePct??'—'}</td>
+          <td style="padding:4px 8px;font-weight:700">Last Present</td><td style="padding:4px 8px">${flags.lastPresentDate?fmtDate(flags.lastPresentDate):'—'}</td></tr>
+      <tr><td style="padding:4px 8px;font-weight:700">Consecutive Absent</td><td style="padding:4px 8px">${flags.consecutiveAbsent||0} day(s)</td>
+          <td style="padding:4px 8px;font-weight:700">Class Teacher</td><td style="padding:4px 8px">${esc(classTeacherMap[s.class]||'—')}</td></tr>
+      <tr><td style="padding:4px 8px;font-weight:700">Status</td><td style="padding:4px 8px">${esc(status)}</td>
+          <td style="padding:4px 8px;font-weight:700">Reason</td><td style="padding:4px 8px">${esc(s.continuationReason||'—')}${s.continuationReasonNote?': '+esc(s.continuationReasonNote):''}</td></tr>
+    </table>
+    <div style="font-weight:800;margin-bottom:6px">Follow-Up History</div>
+    <table style="width:100%;border-collapse:collapse;font-size:10.5px">
+      <thead><tr><th>Date</th><th>By</th><th>Method</th><th>Reason</th><th>Parent Response</th><th>Action</th><th>Notes</th></tr></thead>
+      <tbody>${history.length?history.map(f=>`<tr><td>${fmtDate(f.createdAt)}</td><td>${esc(f.followedBy||'—')}</td><td>${esc(f.contactMethod||'—')}</td><td>${esc(f.reason||'—')}</td><td>${esc(f.parentResponse||'—')}</td><td>${esc(f.actionTaken||'—')}</td><td>${esc(f.notes||'—')}</td></tr>`).join(''):'<tr><td colspan="7" style="text-align:center;padding:10px">No follow-up records yet</td></tr>'}</tbody>
+    </table>
+    <div class="signatures" style="margin-top:30px">
+      <div class="sig-box"><div class="sig-line"></div>Class Teacher</div>
+      <div class="sig-box"><div class="sig-line"></div>Principal</div>
+    </div>`;
+  printWindow('Student Follow-Up Report', body);
+}
+
 // ═══════════════════════════════════════════════════════
 //  PANCHAYAT ADMISSION MAP
 //  School location verified from Sau's Google Maps link (Uttar Radhanagar
@@ -17886,30 +18527,47 @@ function tcCertificateHTML(tc){
     ['Government / Banglar Shiksha ID', tc.banglarShikshaId],
     ['Remarks', tc.remarks]
   ].filter(([,v])=>v);
+  const logo = ls('schoolLogo') || SCHOOL.logo || '';
+  const principalSig = ls('principalSig') || '';
   return `
-  <div style="text-align:center;border-bottom:3px solid #1a3a6b;padding-bottom:14px;margin-bottom:18px">
-    <div style="font-family:'Playfair Display',serif;font-size:22px;font-weight:800;color:#1a3a6b">Children's Paradise School</div>
-    <div style="font-size:11px;color:#6b7a99;margin-top:2px">Uttar Radhanagar, Magrahat, South 24 Parganas, West Bengal</div>
-    <div style="font-size:16px;font-weight:900;letter-spacing:2px;color:#c9a84c;margin-top:10px">TRANSFER CERTIFICATE</div>
-  </div>
-  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:14px">
-    <div><b>TC No:</b> ${esc(tc.tcNo||'—')}</div>
-    <div><b>Date:</b> ${tc.issueDate?esc(fmtDate(tc.issueDate)):'—'}</div>
-  </div>
-  <table style="width:100%;border-collapse:collapse;font-size:12.5px">
-    ${rows.map(([l,v])=>`<tr><td style="padding:6px 8px;border:1px solid #d0dbe8;font-weight:700;width:38%;background:#f8faff">${l}</td><td style="padding:6px 8px;border:1px solid #d0dbe8">${esc(String(v))}</td></tr>`).join('')}
-  </table>
-  <div style="margin-top:40px;display:flex;justify-content:space-between;font-size:12px">
-    <div>Class Teacher Signature: _______________</div>
-    <div>Office Signature: _______________</div>
-    <div>Principal Signature: _______________</div>
-  </div>
-  <div style="margin-top:30px;text-align:right;font-size:11px;color:#6b7a99">School Seal</div>`;
+  <div style="border:2.5px solid #1a3a6b;border-radius:4px;padding:10px;background:#fff;box-sizing:border-box;min-height:267mm;display:flex;flex-direction:column">
+    <div style="border:1px solid #c9a84c;border-radius:2px;padding:22px 26px;box-sizing:border-box;flex:1;display:flex;flex-direction:column;justify-content:space-between">
+      <div>
+        <div style="text-align:center;padding-bottom:14px;margin-bottom:16px;border-bottom:3px double #1a3a6b">
+          ${logo?`<img src="${logo}" style="width:72px;height:72px;object-fit:contain;margin-bottom:6px">`:''}
+          <div style="font-family:'Playfair Display',serif;font-size:24px;font-weight:800;color:#1a3a6b;letter-spacing:.5px">Children's Paradise School</div>
+          <div style="font-size:11px;color:#6b7a99;margin-top:2px">Uttar Radhanagar, Magrahat, South 24 Parganas, West Bengal</div>
+          <div style="display:inline-block;margin-top:12px;padding:5px 22px;border:1.5px solid #c9a84c;border-radius:3px;font-size:16px;font-weight:900;letter-spacing:3px;color:#8a6d1f;background:#fdf9ee">TRANSFER CERTIFICATE</div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:14px;padding:0 4px">
+          <div><b>TC No:</b> ${esc(tc.tcNo||'—')}</div>
+          <div><b>Date:</b> ${tc.issueDate?esc(fmtDate(tc.issueDate)):'—'}</div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          ${rows.map(([l,v])=>`<tr><td style="padding:6px 10px;border:1px solid #c7d2e3;font-weight:700;width:38%;background:#f8faff">${l}</td><td style="padding:6px 10px;border:1px solid #c7d2e3">${esc(String(v))}</td></tr>`).join('')}
+        </table>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;padding:0 20px 10px">
+        <div style="text-align:center;width:38%">
+          <div style="height:46px"></div>
+          <div style="border-top:1.5px solid #1a3a6b;padding-top:6px;font-size:12px;font-weight:700;color:#1a3a6b">Class Teacher Signature</div>
+        </div>
+        <div style="text-align:center;width:20%;font-size:10.5px;color:#6b7a99">
+          <div style="width:64px;height:64px;border:1.5px dashed #b7c3d9;border-radius:50%;margin:0 auto 6px;display:flex;align-items:center;justify-content:center">School Seal</div>
+        </div>
+        <div style="text-align:center;width:38%">
+          ${principalSig?`<img src="${principalSig}" style="height:46px;object-fit:contain">`:`<div style="height:46px"></div>`}
+          <div style="border-top:1.5px solid #1a3a6b;padding-top:6px;font-size:12px;font-weight:700;color:#1a3a6b">Principal Signature</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
 }
 function previewTCModal(tcId){
   const tc=getTCById(tcId);
   if(!tc){ toast('TC record not found','error'); return; }
-  openModal(`Preview — ${esc(tc.studentName)}`, `<div style="background:white;padding:14px">${tcCertificateHTML(tc)}</div>`, [
+  openModal(`Preview — ${esc(tc.studentName)}`, `<div style="background:#e9edf5;padding:14px">${tcCertificateHTML(tc)}</div>`, [
     {label:'<i class="fas fa-print"></i> Print', cls:'btn-primary', onclick:`printTC('${tc.id}')`},
     {label:'Edit', cls:'btn-outline', onclick:`openTCFormModal('${tc.id}')`},
     {label:'Close', cls:'btn-outline', onclick:'closeModal()'}
@@ -17922,8 +18580,8 @@ function printTC(tcId){
   w.document.write(`<!DOCTYPE html><html><head><title>TC ${esc(tc.tcNo||'')} - ${esc(tc.studentName)}</title>
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
   <style>
-    body{font-family:'Nunito',sans-serif;padding:0;color:#1a2740}
-    @page{size:A4 portrait;margin:20mm}
+    body{font-family:'Nunito',sans-serif;padding:0;margin:0;color:#1a2740}
+    @page{size:A4 portrait;margin:15mm}
   </style></head><body>${tcCertificateHTML(tc)}</body></html>`);
   w.document.close(); w.focus(); setTimeout(()=>{w.print();w.close();},400);
 }
@@ -17992,6 +18650,7 @@ function renderNeedAttention(){
   <div class="section-header">
     <div class="section-title"><i class="fas fa-exclamation-triangle" style="color:var(--danger)"></i> Students Need Attention</div>
     ${!isTeacher?`<button class="btn btn-outline btn-sm" onclick="openAttentionSettingsModal()"><i class="fas fa-sliders-h"></i> Thresholds</button>`:''}
+    <button class="btn btn-outline btn-sm" onclick="showPage('continuation')"><i class="fas fa-user-clock"></i> Attendance Continuation</button>
   </div>
 
   ${!isTeacher&&classSummary.length?`
@@ -18139,12 +18798,17 @@ function buildNeedAttentionCard(it){
 
 function openAttentionSettingsModal(){
   const cfg=getAttentionSettings();
-  openModal('Academic Attention Thresholds',`
+  openModal('Attention Thresholds',`
+    <div style="font-weight:800;color:var(--primary);margin-bottom:6px">📊 Academic</div>
     <div class="form-group"><label>🔴 Critical — Overall % below</label><input id="asCritical" type="number" min="0" max="100" value="${cfg.criticalPct}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
     <div class="form-group"><label>🟠 Needs Attention — Overall % below</label><input id="asAttention" type="number" min="0" max="100" value="${cfg.attentionPct}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
     <div class="form-group"><label>Subject Minimum % (flag weak subject below this)</label><input id="asSubjMin" type="number" min="0" max="100" value="${cfg.subjectMinPct}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
     <div class="form-group"><label>Decline Threshold (percentage-point drop between terms)</label><input id="asDecline" type="number" min="1" max="100" value="${cfg.declineThreshold}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
-  `,[{label:'<i class="fas fa-save"></i> Save',cls:'btn-primary',onclick:`saveAttentionSettings();refreshNeedAttentionList();closeModal();`},{label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}]);
+    <div style="font-weight:800;color:var(--primary);margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--border)">🎒 Attendance &amp; Continuation</div>
+    <div class="form-group"><label>🟡 Attention — consecutive absent school days</label><input id="asAttnDays" type="number" min="1" value="${cfg.attentionDays}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
+    <div class="form-group"><label>🟠 Follow-Up Required — consecutive absent school days</label><input id="asFollowDays" type="number" min="1" value="${cfg.followUpDays}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
+    <div class="form-group"><label>🔴 Principal Review — consecutive absent school days</label><input id="asReviewDays" type="number" min="1" value="${cfg.principalReviewDays}" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>
+  `,[{label:'<i class="fas fa-save"></i> Save',cls:'btn-primary',onclick:`saveAttentionSettings();if(typeof refreshNeedAttentionList==='function')refreshNeedAttentionList();if(typeof refreshContinuationList==='function')refreshContinuationList();closeModal();`},{label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}]);
 }
 
 // ── Smart, data-only suggestions (no external AI, no invented reasons) ──
