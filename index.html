@@ -3554,11 +3554,11 @@ function renderGovDashboard(){
   const stats=computeGovStats(students);
   const pct=stats.total?Math.round(stats.ID_CREATED/stats.total*100):0;
   const cards=[
-    ['👨‍🎓','Total Students',stats.total,'badge-primary',govGenderSubLine(stats,null)],
-    ['🟢','ID Created',stats.ID_CREATED,'badge-success',govGenderSubLine(stats,'ID_CREATED')],
-    ['🟡','Form Submitted',stats.FORM_SUBMITTED,'badge-warning',govGenderSubLine(stats,'FORM_SUBMITTED')],
-    ['🔵','Existing ID in Govt. School',stats.EXISTING_ID_IN_GOVT_SCHOOL,'badge-info',govGenderSubLine(stats,'EXISTING_ID_IN_GOVT_SCHOOL')],
-    ['🔴','Form Not Submitted',stats.FORM_NOT_SUBMITTED,'badge-danger',govGenderSubLine(stats,'FORM_NOT_SUBMITTED')]
+    [null,'👨‍🎓','Total Students',stats.total,'badge-primary',govGenderSubLine(stats,null)],
+    ['ID_CREATED','🟢','ID Created',stats.ID_CREATED,'badge-success',govGenderSubLine(stats,'ID_CREATED')],
+    ['FORM_SUBMITTED','🟡','Form Submitted',stats.FORM_SUBMITTED,'badge-warning',govGenderSubLine(stats,'FORM_SUBMITTED')],
+    ['EXISTING_ID_IN_GOVT_SCHOOL','🔵','Existing ID in Govt. School',stats.EXISTING_ID_IN_GOVT_SCHOOL,'badge-info',govGenderSubLine(stats,'EXISTING_ID_IN_GOVT_SCHOOL')],
+    ['FORM_NOT_SUBMITTED','🔴','Form Not Submitted',stats.FORM_NOT_SUBMITTED,'badge-danger',govGenderSubLine(stats,'FORM_NOT_SUBMITTED')]
   ];
   return `
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
@@ -3586,11 +3586,11 @@ function renderGovDashboard(){
   </div>
 
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
-    ${cards.map(([icon,label,val,badge,sub])=>`
-      <div style="background:white;border-radius:14px;padding:14px 16px;border:1.5px solid #e8eef5;display:flex;align-items:center;gap:8px">
+    ${cards.map(([status,icon,label,val,badge,sub])=>`
+      <div onclick="openGovStatusList(${status?`'${status}'`:'null'})" style="background:white;border-radius:14px;padding:14px 16px;border:1.5px solid #e8eef5;display:flex;align-items:center;gap:8px;cursor:pointer;transition:box-shadow .15s" onmouseover="this.style.boxShadow='0 4px 14px rgba(0,0,0,.08)'" onmouseout="this.style.boxShadow='none'">
         <div style="font-size:22px">${icon}</div>
         <div style="min-width:0">
-          <div style="font-size:11px;color:#6b7a99;font-weight:700">${label}</div>
+          <div style="font-size:11px;color:#6b7a99;font-weight:700">${label} <i class="fas fa-chevron-right" style="font-size:8px;opacity:.5"></i></div>
           <div style="font-size:18px;font-weight:900;color:#0d1f3c">${val} <span style="font-size:11px;font-weight:700;color:#6b7a99">(${stats.total?Math.round(val/stats.total*100):0}%)</span></div>
           ${sub?`<div style="font-size:10.5px;color:#94a3b8;font-weight:700;margin-top:2px">${sub}</div>`:''}
         </div>
@@ -3599,6 +3599,80 @@ function renderGovDashboard(){
   <div style="margin-top:14px;font-size:11px;color:#94a3b8">
     Note: this ERP prepares and tracks government record data. It does not submit directly to UDISE / Banglar Shiksha — export/print the data and submit through the official government portal, then record the status here.
   </div>`;
+}
+
+// ── Clickable dashboard cards: list every student in a given status
+// (or all students if status is null), with a Boy/Girl/All filter and a
+// printable A4 report — session-wide across every class, not just one. ──
+function openGovStatusList(status){
+  window._govListStatus = status;
+  window._govListGender = 'All';
+  const session=getActiveSession();
+  const title = status ? `${GOV_STATUS_META[status]?.icon||''} ${GOV_STATUS_META[status]?.label||status}` : '👨‍🎓 All Students';
+  openModal(title, `
+    <div class="no-print" style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm btn-outline gov-gender-btn" data-g="All" onclick="setGovListGender('All')">All</button>
+        <button class="btn btn-sm btn-outline gov-gender-btn" data-g="Male" onclick="setGovListGender('Male')">👦 Boys</button>
+        <button class="btn btn-sm btn-outline gov-gender-btn" data-g="Female" onclick="setGovListGender('Female')">👧 Girls</button>
+      </div>
+      <button class="btn btn-sm btn-primary" style="margin-left:auto" onclick="printGovStatusList()"><i class="fas fa-print"></i> Print A4</button>
+    </div>
+    <div id="govStatusListBody"></div>
+  `, [{label:'Close',cls:'btn-outline',onclick:'closeModal()'}], 'modal-lg');
+  loadGovStatusList();
+}
+function setGovListGender(g){ window._govListGender=g; loadGovStatusList(); }
+function getGovStatusListStudents(){
+  const session=getActiveSession();
+  const status=window._govListStatus;
+  const gender=window._govListGender||'All';
+  const all=getAllGovRecords();
+  let students=(ls('students')||[]).filter(s=>s.session===session);
+  if(status) students=students.filter(s=>(all[s.id]||defaultGovRecord()).status===status);
+  if(gender!=='All') students=students.filter(s=>(s.gender||'')===gender);
+  return students.sort((a,b)=>a.class.localeCompare(b.class)||(a.roll||0)-(b.roll||0));
+}
+function loadGovStatusList(){
+  const body=document.getElementById('govStatusListBody');
+  if(!body) return;
+  const gender=window._govListGender||'All';
+  document.querySelectorAll('.gov-gender-btn').forEach(b=>b.classList.toggle('btn-primary',b.dataset.g===gender));
+  document.querySelectorAll('.gov-gender-btn').forEach(b=>b.classList.toggle('btn-outline',b.dataset.g!==gender));
+  const all=getAllGovRecords();
+  const students=getGovStatusListStudents();
+  body.innerHTML = students.length ? `
+    <div class="text-sm text-muted" style="margin-bottom:8px">${students.length} student${students.length===1?'':'s'}</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+      <thead><tr style="background:#f0f4ff"><th style="padding:6px 8px;text-align:left">Class</th><th style="padding:6px 8px;text-align:left">Roll</th><th style="padding:6px 8px;text-align:left">Name</th><th style="padding:6px 8px;text-align:left">Gender</th><th style="padding:6px 8px;text-align:left">Govt. ID</th><th style="padding:6px 8px;text-align:left">Phone</th></tr></thead>
+      <tbody>${students.map(s=>{
+        const rec=all[s.id]||defaultGovRecord();
+        return `<tr style="border-bottom:1px solid #f0f4ff"><td style="padding:6px 8px">${esc(s.class)}</td><td style="padding:6px 8px">${s.roll||'—'}</td><td style="padding:6px 8px;font-weight:700">${esc(s.name)}</td><td style="padding:6px 8px">${esc(s.gender||'—')}</td><td style="padding:6px 8px">${esc(rec.banglarShikshaId||'—')}</td><td style="padding:6px 8px">${esc(s.phone||'—')}</td></tr>`;
+      }).join('')}</tbody>
+    </table>` : emptyState('📭','No students in this category',(gender!=='All')?`Try switching the filter back to "All"`:'');
+}
+function printGovStatusList(){
+  const session=getActiveSession();
+  const status=window._govListStatus;
+  const gender=window._govListGender||'All';
+  const students=getGovStatusListStudents();
+  const all=getAllGovRecords();
+  const title = status ? `${GOV_STATUS_META[status]?.label||status}` : 'All Students';
+  const body=`
+    ${schoolHeaderHTML(`Government Record — ${esc(title)}`)}
+    <div style="font-size:11px;margin:8px 0 14px">Session: ${esc(session)} &nbsp;|&nbsp; Category: ${esc(title)}${gender!=='All'?` (${gender==='Male'?'Boys':'Girls'})`:''} &nbsp;|&nbsp; Date: ${esc(fmtDate(today()))} &nbsp;|&nbsp; Total: ${students.length}</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <thead><tr><th>Sl</th><th>Class</th><th>Roll</th><th>Student Name</th><th>Gender</th><th>Government ID</th><th>Phone</th></tr></thead>
+      <tbody>${students.map((s,i)=>{
+        const rec=all[s.id]||defaultGovRecord();
+        return `<tr><td>${i+1}</td><td>${esc(s.class)}</td><td>${s.roll||'—'}</td><td>${esc(s.name)}</td><td>${esc(s.gender||'—')}</td><td>${esc(rec.banglarShikshaId||'—')}</td><td>${esc(s.phone||'—')}</td></tr>`;
+      }).join('')}</tbody>
+    </table>
+    <div class="signatures" style="margin-top:30px">
+      <div class="sig-box"><div class="sig-line"></div>Office</div>
+      <div class="sig-box"><div class="sig-line"></div>Principal</div>
+    </div>`;
+  printWindow(`Government Record — ${title}`, body);
 }
 
 function govClassGroups(students){
