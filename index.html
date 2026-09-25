@@ -6600,7 +6600,7 @@ function renderFeeRegister(){
     <div class="flex gap-8 flex-wrap">
       <button class="btn btn-primary no-print" onclick="openBillBookManager()"><i class="fas fa-book-open"></i> Bill Book Manager</button>
       <button class="btn btn-gold no-print" onclick="exportFeeRegisterExcel()"><i class="fas fa-file-excel"></i> Export to Excel</button>
-      <button class="btn btn-outline no-print" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+      <button class="btn btn-outline no-print" onclick="printFeeRegister()"><i class="fas fa-print"></i> Print</button>
     </div>
   </div>
 
@@ -7276,6 +7276,104 @@ function exportFeeRegisterExcel(){
   toast('✅ Excel file downloaded!');
 }
 
+// ── Proper printable Fee Register — landscape A4, compact grid, reuses the
+// same canonical totals as the on-screen register (computeStudentFeeTotals)
+// so printed figures can never drift from what's shown on screen. ──
+function printFeeRegister(){
+  const session = document.getElementById('frSession')?.value || getActiveSession();
+  const cls     = document.getElementById('frClass')?.value || getAllClasses()[0];
+  const students = (ls('students')||[]).filter(s=>s.session===session&&s.class===cls).sort((a,b)=>(a.roll||0)-(b.roll||0));
+  if(!students.length){ toast('No students to print','error'); return; }
+
+  const fees = ls('fees')||{};
+  const cm = currMonth();
+  const examTerms = ['Term 1','Term 2','Term 3'];
+  let grandPaid=0, grandDue=0;
+
+  const rowsHTML = students.map(s=>{
+    const sf = fees[s.id]||{};
+    const t = computeStudentFeeTotals(s);
+    grandPaid += t.totalPaid; grandDue += t.totalDue;
+
+    const admCell = t.admTotal<=0 ? '—' : (t.admDue<=0 ? '<span class="ok">✓</span>' : `<span class="due">${t.admDue}</span>`);
+    const monthCells = MONTHS.map((_,m)=>{
+      const paid = !!(sf.monthly||{})[m]?.paid;
+      if(paid) return '<td class="ok">✓</td>';
+      if(m<=cm && t.monthly>0) return `<td class="due">${t.monthly}</td>`;
+      return '<td class="na">·</td>';
+    }).join('');
+    const examCells = examTerms.map((tm,i)=>{
+      const ex=(sf.exam||{})[tm];
+      const structFee = getEffectiveFee(s.id,'exam'+(i+1),s.class)||0;
+      const amt = (ex&&ex.amount!==undefined&&ex.amount!==null) ? ex.amount : structFee;
+      if(ex&&ex.paid) return '<td class="ok">✓</td>';
+      if(amt>0) return `<td class="due">${amt}</td>`;
+      return '<td class="na">—</td>';
+    }).join('');
+
+    return `<tr>
+      <td>${s.roll||'—'}</td>
+      <td class="name">${esc(s.name)}</td>
+      <td class="${t.admTotal<=0?'na':(t.admDue<=0?'ok':'due')}">${admCell}</td>
+      ${monthCells}
+      ${examCells}
+      <td class="paidcol">₹${t.totalPaid}</td>
+      <td class="duecol">₹${t.totalDue}</td>
+    </tr>`;
+  }).join('');
+
+  const body = `
+    ${schoolHeaderHTML(`Fee Register — ${esc(cls)}, Session ${esc(session)}`)}
+    <div class="frp-meta">Class: <b>${esc(cls)}</b> &nbsp;|&nbsp; Session: <b>${esc(session)}</b> &nbsp;|&nbsp; Total Students: <b>${students.length}</b> &nbsp;|&nbsp; Print Date: <b>${esc(fmtDate(today()))}</b></div>
+    <table class="frp-table">
+      <thead>
+        <tr>
+          <th rowspan="2">Roll</th><th rowspan="2">Name</th><th rowspan="2">Adm</th>
+          <th colspan="12">Monthly Fee</th>
+          <th colspan="3">Exam</th>
+          <th rowspan="2">Paid</th><th rowspan="2">Due</th>
+        </tr>
+        <tr>${MONTHS.map(m=>`<th class="sm">${m}</th>`).join('')}${examTerms.map(t=>`<th class="sm">${t.replace('Term ','T')}</th>`).join('')}</tr>
+      </thead>
+      <tbody>${rowsHTML}</tbody>
+      <tfoot>
+        <tr class="grand">
+          <td colspan="18" style="text-align:right">GRAND TOTAL &nbsp;→</td>
+          <td class="paidcol">₹${grandPaid}</td>
+          <td class="duecol">₹${grandDue}</td>
+        </tr>
+      </tfoot>
+    </table>
+    <div class="frp-legend"><span class="ok">✓</span> Paid &nbsp; <span class="due">123</span> Due (₹ amount) &nbsp; <span class="na">· / —</span> Not yet due / Not applicable</div>
+    <div class="signatures" style="margin-top:26px">
+      <div class="sig-box"><div class="sig-line"></div>Accountant</div>
+      <div class="sig-box"><div class="sig-line"></div>Principal</div>
+    </div>
+    <style>
+      @page{size:A4 landscape;margin:9mm}
+      .frp-meta{font-size:11px;margin:6px 0 10px;text-align:center;color:#334155}
+      table.frp-table{width:100%;border-collapse:collapse;font-size:8.3px;table-layout:fixed}
+      table.frp-table th,table.frp-table td{border:1px solid #b9c3d4;padding:3px 2px;text-align:center}
+      table.frp-table th{background:#1a3a6b;color:#fff;font-size:8px;text-transform:uppercase}
+      table.frp-table th.sm{font-size:7.3px;padding:2.5px 1px}
+      table.frp-table td.name{text-align:left;padding-left:4px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px}
+      table.frp-table td.ok{color:#15803d;font-weight:900}
+      table.frp-table td.due{color:#b91c1c;font-weight:800}
+      table.frp-table td.na{color:#c3cad6}
+      table.frp-table td.paidcol{color:#15803d;font-weight:800;background:#f0fdf4}
+      table.frp-table td.duecol{color:#b91c1c;font-weight:800;background:#fef2f2}
+      table.frp-table tbody tr:nth-child(even){background:#f8faff}
+      table.frp-table tfoot tr.grand td{background:#1a3a6b;color:#fff;font-weight:900;font-size:10px;padding:6px 4px}
+      table.frp-table tfoot tr.grand td.paidcol,table.frp-table tfoot tr.grand td.duecol{background:#1a3a6b;color:#f0c94e}
+      .frp-legend{font-size:9px;margin-top:8px;color:#475569}
+      .frp-legend .ok{color:#15803d;font-weight:900}
+      .frp-legend .due{color:#b91c1c;font-weight:800}
+      .frp-legend .na{color:#94a3b8}
+    </style>`;
+  printWindow('Fee Register', body);
+}
+
+
 // ===========================
 //  ATTENDANCE
 // ===========================
@@ -7567,7 +7665,7 @@ function renderReportCard(){
     <button class="btn btn-primary" onclick="loadReportCard()"><i class="fas fa-eye"></i> View Report Card</button>
     <button class="btn btn-gold ml-8" onclick="loadClassReportCards()"><i class="fas fa-users"></i> Class Report</button>
     <button class="btn btn-outline ml-8" onclick="openDevProfileEntry()"><i class="fas fa-star-half-alt"></i> Development Profile</button>
-    <button class="btn btn-outline ml-8" onclick="printBlankReportCardTemplate()"><i class="fas fa-file-signature"></i> Print Blank Template</button>
+    <button class="btn btn-outline ml-8" onclick="previewBlankReportCard(null)"><i class="fas fa-file-signature"></i> View Blank Template</button>
   </div>
   <div id="reportCardArea"></div>`;
 }
@@ -7581,97 +7679,44 @@ function loadClassReportCards(){
   const area=document.getElementById('reportCardArea');
   if(!area) return;
   area.innerHTML=`<div class="card"><div style="font-weight:800;color:var(--primary);margin-bottom:12px">Class Report — ${cls} (${students.length} students)</div>
-    <div style="display:flex;flex-wrap:wrap;gap:8px">${students.map(s=>`<button class="btn btn-outline btn-sm" onclick="document.getElementById('rcStudent').value='${s.id}';loadReportCard()"><i class="fas fa-file-alt"></i> ${s.name}</button>`).join('')}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">${students.map(s=>`
+      <span style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <button class="btn btn-outline btn-sm" style="border:none;border-radius:0" onclick="document.getElementById('rcStudent').value='${s.id}';loadReportCard()"><i class="fas fa-file-alt"></i> ${s.name}</button>
+        <button class="btn btn-outline btn-sm" style="border:none;border-left:1px solid var(--border);border-radius:0;color:#8a6d1f" title="View blank card for ${s.name}" onclick="previewBlankReportCard('${s.id}')"><i class="fas fa-file-signature"></i></button>
+      </span>`).join('')}</div>
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-primary" onclick="printAllReportCards('${cls}')"><i class="fas fa-print"></i> Print All Report Cards</button>
       <button class="btn btn-outline" onclick="downloadClassReportCardsJPG('${cls}')"><i class="fas fa-file-archive"></i> Download All as JPG (ZIP)</button>
       <button class="btn btn-gold" onclick="printBlankReportCards('${cls}')"><i class="fas fa-file-signature"></i> Print Blank Report Cards</button>
     </div>
-    <div class="text-xs text-muted" style="margin-top:6px">💡 "Print Blank Report Cards" gives one card per student (name/roll/class filled in, subjects listed) with every mark, attendance, rank, total and remarks box left empty — for when marks need to be written in by hand.</div>
+    <div class="text-xs text-muted" style="margin-top:6px">💡 Each name above opens that student's real card; the 🖊️ icon next to it opens their <b>blank</b> card (same design, view → print → download JPG) — or use "Print Blank Report Cards" to print every blank card for the whole class at once.</div>
   </div>`;
 }
 
 // ── Blank Report Card (name/class/roll/subjects pre-printed, everything the
 // teacher would normally compute or enter left as an empty box to hand-write —
-// for use when data entry/computation isn't available) ──
-function blankReportCardHTML(s, session, subjects, terms){
-  return `<div class="rc-page">
-    <div class="rc-top">
-      <div class="rc-logo">${SCHOOL.logo?`<img src="${SCHOOL.logo}">`:'🎓'}</div>
-      <div style="flex:1">
-        <div class="rc-sname">${esc(SCHOOL.name)}</div>
-        <div class="rc-saddr">${esc(SCHOOL.address)}</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:9px;color:#94a3b8">Session</div>
-        <div style="font-size:14px;font-weight:900;color:#c9a84c">${esc(String(session||''))}</div>
-      </div>
-    </div>
-    <div class="rc-titlebar">Progress Report Card</div>
-    <table class="rc-info">
-      <tr><td class="l">Name</td><td class="v">${s?esc(s.name):'&nbsp;'}</td><td class="l">Class</td><td class="v">${s?esc(s.class):'&nbsp;'}</td></tr>
-      <tr><td class="l">Roll No.</td><td class="v">${s?s.roll:'&nbsp;'}</td><td class="l">Attendance</td><td class="v">&nbsp;</td></tr>
-      <tr><td class="l">Father's Name</td><td class="v">${s&&s.fatherName?esc(s.fatherName):'&nbsp;'}</td><td class="l">Class Rank</td><td class="v">&nbsp;</td></tr>
-    </table>
-    ${subjects.length?`<table class="rc-marks">
-      <thead><tr><th style="text-align:left">Subject</th>${terms.map(t=>`<th>${esc(t)}</th>`).join('')}<th>Final %</th></tr></thead>
-      <tbody>${subjects.map(sub=>`<tr><td style="text-align:left;font-weight:700">${esc(sub)}</td>${terms.map(()=>'<td>&nbsp;</td>').join('')}<td>&nbsp;</td></tr>`).join('')}</tbody>
-    </table>`:`<table class="rc-marks">
-      <thead><tr><th style="text-align:left">Subject</th>${terms.map(t=>`<th>${esc(t)}</th>`).join('')}<th>Final %</th></tr></thead>
-      <tbody>${[1,2,3,4,5,6].map(()=>`<tr><td style="text-align:left">&nbsp;</td>${terms.map(()=>'<td>&nbsp;</td>').join('')}<td>&nbsp;</td></tr>`).join('')}</tbody>
-    </table>`}
-    <div class="rc-resbar">
-      <div><div class="l">Total</div><div class="v">&nbsp;</div></div>
-      <div><div class="l">Percentage</div><div class="v">&nbsp;</div></div>
-      <div><div class="l">Grade</div><div class="v">&nbsp;</div></div>
-      <div><div class="l">Result</div><div class="v">&nbsp;</div></div>
-    </div>
-    <div class="rc-remarks">
-      <div><div class="l">Class Teacher Remarks</div><div class="txt" style="min-height:32px">&nbsp;</div></div>
-      <div><div class="l">Principal Remarks</div><div class="txt" style="min-height:32px">&nbsp;</div></div>
-    </div>
-    <div class="rc-sigrow">
-      <div><div class="line"></div>Class Teacher</div>
-      <div><div class="line"></div>Headmaster / Principal</div>
-      <div><div class="line"></div>Parent / Guardian</div>
-    </div>
-    <div class="rc-footer">${esc(SCHOOL.name)} · ${esc(SCHOOL.address)} · Blank template — for hand-written entry</div>
-  </div>`;
+// for use when data entry/computation isn't available). Uses the exact same
+// .sheet design as the real cards (blankReportCardSheetInnerHTML lives near
+// buildReportCardDocHTML) so View/Print/Download-JPG always match. ──
+// ── Class Report list — real cards (click a name) plus a blank-card view
+// icon for each student, so blank cards get the same View→Print→JPG flow ──
+function printAllReportCards(cls){
+  const session=getActiveSession();
+  const students=(ls('students')||[]).filter(s=>s.session===session&&s.class===cls).sort((a,b)=>a.roll-b.roll);
+  if(!students.length){toast('No students found','error');return;}
+  const cards=students.map(s=>{
+    const st=rcComputeStats(s, session);
+    return reportCardSheetInnerHTML(s,st);
+  }).join('');
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html>${reportCardDocHead('Report Cards — '+cls)}<body>
+    ${cards}</body></html>`);
+  w.document.close(); w.focus();
 }
-function reportCardPrintCSS(){
-  return `
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:'Nunito',sans-serif;color:#1a2740}
-    @media print{.no-print{display:none}}
-    .no-print{margin:10px}
-    .no-print button{padding:10px 24px;background:#1a3a6b;color:white;border:none;border-radius:8px;font-size:13px;cursor:pointer}
-    .rc-page{page-break-after:always;padding:14mm 14mm;border:2.5px solid #1a3a6b;border-radius:8px;margin:8px;font-size:11px}
-    .rc-top{display:flex;align-items:center;gap:10px;background:linear-gradient(135deg,#0d1f3c,#2456a4);padding:10px 14px;border-radius:6px;color:white;margin-bottom:0}
-    .rc-logo{width:44px;height:44px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:3px}
-    .rc-logo img{width:100%;height:100%;object-fit:contain}
-    .rc-sname{font-family:'Playfair Display',serif;font-size:15px;font-weight:800}
-    .rc-saddr{font-size:9px;color:rgba(255,255,255,.7);margin-top:1px}
-    .rc-titlebar{background:linear-gradient(90deg,#7c5c0a,#c9a84c,#f0c040,#c9a84c,#7c5c0a);padding:5px;text-align:center;font-size:11px;font-weight:900;color:#1a2740;letter-spacing:2px;text-transform:uppercase}
-    table.rc-info{width:100%;border-collapse:collapse;margin:10px 0;font-size:11px}
-    table.rc-info td{padding:5px 8px;border:1px solid #e2e8f0}
-    table.rc-info td.l{font-weight:800;color:#6b7a99;background:#f8faff;width:18%}
-    table.rc-info td.v{font-weight:700;color:#1a3a6b}
-    table.rc-marks{width:100%;border-collapse:collapse;font-size:10px;border:1.5px solid #1a3a6b}
-    table.rc-marks th{background:#1a3a6b;color:white;padding:6px 6px;text-align:center;font-size:9px;text-transform:uppercase}
-    table.rc-marks td{padding:9px 6px;text-align:center;border-bottom:1px solid #e2e8f0}
-    table.rc-marks tr:nth-child(even) td{background:#f8faff}
-    .rc-resbar{display:flex;justify-content:space-around;background:#f8faff;border:1px solid #d0dbe8;border-radius:6px;padding:8px;margin-top:10px}
-    .rc-resbar .l{font-size:8px;color:#6b7a99;font-weight:800;text-transform:uppercase;text-align:center}
-    .rc-resbar .v{font-size:15px;font-weight:900;color:#1a3a6b;text-align:center;margin-top:2px;border-bottom:1px solid #94a3b8;min-height:20px}
-    .rc-remarks{display:flex;gap:8px;margin-top:10px}
-    .rc-remarks>div{flex:1;border:1px solid #d0dbe8;border-radius:6px;padding:6px 8px}
-    .rc-remarks .l{font-size:8px;color:#6b7a99;font-weight:800;text-transform:uppercase}
-    .rc-remarks .txt{font-size:10px;font-weight:600;margin-top:3px;line-height:1.4}
-    .rc-sigrow{display:flex;justify-content:space-between;padding:20px 10px 4px;font-size:10px;color:#6b7a99;text-align:center}
-    .rc-sigrow .line{border-top:1.5px solid #1a3a6b;width:100px;margin:0 auto 4px}
-    .rc-footer{text-align:center;margin-top:8px;padding-top:6px;border-top:1px solid #e2e8f0;font-size:8.5px;color:#9aa8c0}
-  `;
-}
+
+// ── Blank Report Cards — same .sheet design as the real cards above, via
+// blankReportCardSheetInnerHTML/buildBlankReportCardDocHTML (defined near
+// buildReportCardDocHTML) so View / Print / Download JPG all match exactly.
 function printBlankReportCards(cls){
   cls = cls || document.getElementById('rcClass')?.value;
   if(!cls){ toast('Select a class first','error'); return; }
@@ -7680,94 +7725,11 @@ function printBlankReportCards(cls){
   if(!students.length){ toast('No students found for this class','error'); return; }
   const subjects=getExamRegisterSubjectNames(cls)||[];
   const terms=['Term 1','Term 2','Term 3'];
-  const cards=students.map(s=>blankReportCardHTML(s,session,subjects,terms)).join('');
+  const cards=students.map(s=>blankReportCardSheetInnerHTML(s,session,subjects,terms)).join('');
   const w=window.open('','_blank');
-  w.document.write(`<!DOCTYPE html><html><head><title>Blank Report Cards — ${esc(cls)}</title>
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
-  <style>${reportCardPrintCSS()}</style></head><body>
-    <div class="no-print"><button onclick="window.print()">🖨️ Print All</button></div>
+  w.document.write(`<!DOCTYPE html><html>${reportCardDocHead('Blank Report Cards — '+cls)}<body>
     ${cards}</body></html>`);
-  w.document.close();
-}
-// A single, entirely blank template (no student tied) — for when even the
-// class roster isn't available and copies just need to be run off and
-// filled in completely by hand.
-function printBlankReportCardTemplate(){
-  const session=getActiveSession();
-  const terms=['Term 1','Term 2','Term 3'];
-  const card=blankReportCardHTML(null,session,[],terms);
-  const w=window.open('','_blank');
-  w.document.write(`<!DOCTYPE html><html><head><title>Blank Report Card Template</title>
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
-  <style>${reportCardPrintCSS()}</style></head><body>
-    <div class="no-print"><button onclick="window.print()">🖨️ Print (set copies in the print dialog)</button></div>
-    ${card}</body></html>`);
-  w.document.close();
-}
-
-function printAllReportCards(cls){
-  const session=getActiveSession();
-  const students=(ls('students')||[]).filter(s=>s.session===session&&s.class===cls).sort((a,b)=>a.roll-b.roll);
-  if(!students.length){toast('No students found','error');return;}
-  const w=window.open('','_blank');
-  const cards=students.map(s=>{
-    const st=rcComputeStats(s, session);
-    const sm=st.sm, terms=st.terms, subjects=st.subjects;
-    const rankText = st.rank ? `Rank ${st.rank} of ${st.outOf}` : '—';
-    let rows='';
-    subjects.forEach(sub=>{
-      rows+=`<tr><td style="text-align:left;font-weight:700">${esc(sub)}</td>${terms.map(t=>{const m=(sm[t]||{})[sub];return m?`<td>${m.obtained||0}/${m.total||0}</td>`:'<td>—</td>';}).join('')}<td><strong>${(()=>{let o=0,mx=0;terms.forEach(t=>{const m=(sm[t]||{})[sub];if(m){o+=m.obtained||0;mx+=m.total||0;}});return mx?Math.round(o/mx*100)+'%':'—';})()}</strong></td></tr>`;
-    });
-    return `<div class="rc-page">
-      <div class="rc-top">
-        <div class="rc-logo">${SCHOOL.logo?`<img src="${SCHOOL.logo}">`:'🎓'}</div>
-        <div style="flex:1">
-          <div class="rc-sname">${esc(SCHOOL.name)}</div>
-          <div class="rc-saddr">${esc(SCHOOL.address)}</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:9px;color:#94a3b8">Session</div>
-          <div style="font-size:14px;font-weight:900;color:#c9a84c">${session}</div>
-        </div>
-      </div>
-      <div class="rc-titlebar">Progress Report Card</div>
-      <table class="rc-info">
-        <tr><td class="l">Name</td><td class="v">${esc(s.name)}</td><td class="l">Class</td><td class="v">${esc(s.class)}</td></tr>
-        <tr><td class="l">Roll No.</td><td class="v">${s.roll}</td><td class="l">Attendance</td><td class="v">${st.attText}</td></tr>
-        <tr><td class="l">Father's Name</td><td class="v">${esc(s.fatherName||'—')}</td><td class="l">Class Rank</td><td class="v">${rankText}</td></tr>
-      </table>
-      ${rows?`<table class="rc-marks">
-        <thead><tr><th style="text-align:left">Subject</th><th>Term 1</th><th>Term 2</th><th>Term 3</th><th>Final %</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>`:'<p style="color:#999;padding:8px 0">No marks recorded</p>'}
-      ${st.devTraits.length?`<table class="rc-marks" style="margin-top:8px">
-        <thead><tr><th style="text-align:left">Development Profile</th><th>Term 1</th><th>Term 2</th><th>Term 3</th></tr></thead>
-        <tbody>${st.devTraits.map(t=>`<tr><td style="text-align:left;font-weight:700">${esc(t)}</td>${terms.map(term=>{const g=(st.devByTerm[term]||{})[t];return `<td>${g?`<strong>${g}</strong>`:'—'}</td>`;}).join('')}</tr>`).join('')}</tbody>
-      </table>`:''}
-      ${subjects.length?`<div class="rc-resbar">
-        <div><div class="l">Total</div><div class="v">${st.ovObt}/${st.ovMax}</div></div>
-        <div><div class="l">Percentage</div><div class="v">${st.ovPct}%</div></div>
-        <div><div class="l">Grade</div><div class="v">${st.ovGrade}</div></div>
-        <div><div class="l">Result</div><div class="v" style="color:${st.ovResult==='PASSED'?'#15803d':'#b91c1c'}">${st.ovResult}</div></div>
-      </div>
-      <div class="rc-remarks">
-        <div><div class="l">Class Teacher Remarks</div><div class="txt">${esc(st.remarks.teacher)}</div></div>
-        <div><div class="l">Principal Remarks</div><div class="txt">${esc(st.remarks.principal)}</div></div>
-      </div>`:''}
-      <div class="rc-sigrow">
-        <div><div class="line"></div>Class Teacher</div>
-        <div><div class="line"></div>Headmaster / Principal</div>
-        <div><div class="line"></div>Parent / Guardian</div>
-      </div>
-      <div class="rc-footer">${esc(SCHOOL.name)} · ${esc(SCHOOL.address)} · Computer-generated</div>
-    </div>`;
-  }).join('');
-  w.document.write(`<!DOCTYPE html><html><head><title>Report Cards — ${cls}</title>
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
-  <style>${reportCardPrintCSS()}</style></head><body>
-    <div class="no-print"><button onclick="window.print()">🖨️ Print All</button></div>
-    ${cards}</body></html>`);
-  w.document.close();
+  w.document.close(); w.focus();
 }
 
 function loadRcStudents(){
@@ -16482,67 +16444,21 @@ function loadReportCard(){
   const students=ls('students')||[];
   const s=students.find(x=>x.id===studentId);
   if(!s){toast('Select a student','error');return;}
-  const session=getActiveSession();
-  const st=rcComputeStats(s, session);
-  const sm=st.sm;
-  let html=`<div class="card" id="rcPrint">
-    <div style="text-align:center;padding-bottom:14px;border-bottom:2px solid var(--border)">
-      ${SCHOOL.logo?`<img src="${SCHOOL.logo}" style="width:56px;height:56px;object-fit:contain;margin-bottom:4px">`:''}
-      <div style="font-family:'Playfair Display',serif;font-size:20px;color:var(--primary);font-weight:800">${SCHOOL.name}</div>
-      <div style="font-size:11px;color:var(--text-muted)">${SCHOOL.address}</div>
-      <div style="font-size:16px;font-weight:900;color:var(--gold-dark);margin-top:6px">REPORT CARD — ${session}</div>
+  const html=buildReportCardDocHTML(studentId, true);
+  const area=document.getElementById('reportCardArea');
+  if(!html){
+    area.innerHTML = emptyState('📋','No marks entered yet',`Add marks in Teacher Marks Entry / Exam Register for ${esc(s.name)} first, or use "View Blank Template" above to print a hand-fill version.`);
+    return;
+  }
+  // Shown in an iframe of the EXACT same document that Print/Download JPG
+  // use, so View always matches what actually prints — no separate
+  // on-screen design to drift out of sync.
+  area.innerHTML = `
+  <div style="background:#e9edf5;border-radius:10px;padding:14px;overflow:auto">
+    <div style="transform:scale(.72);transform-origin:top left;width:139%;margin-bottom:-27%">
+      <iframe id="rcPreviewFrame" style="width:210mm;height:297mm;border:none;pointer-events:none" srcdoc="${html.replace(/"/g,'&quot;')}"></iframe>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0;padding:12px;background:#f8faff;border-radius:10px">
-      <div><div class="text-xs text-muted">Student Name</div><div style="font-weight:800">${esc(s.name)}</div></div>
-      <div><div class="text-xs text-muted">Father's Name</div><div style="font-weight:800">${esc(s.fatherName)}</div></div>
-      <div><div class="text-xs text-muted">Class</div><div style="font-weight:800">${s.class}</div></div>
-      <div><div class="text-xs text-muted">Roll No</div><div style="font-weight:800">${s.roll}</div></div>
-      <div><div class="text-xs text-muted">Student ID</div><div style="font-weight:800">${s.studentId}</div></div>
-      <div><div class="text-xs text-muted">Session</div><div style="font-weight:800">${s.session}</div></div>
-    </div>`;
-  st.terms.forEach(term=>{
-    const tm=sm[term];
-    if(!tm||!Object.keys(tm).length) return;
-    const subjects=Object.keys(tm);
-    const total=st.termTotals[term];
-    const fullTotal=st.termMaxes[term];
-    const pct=fullTotal?Math.round(total/fullTotal*100):0;
-    const grade=pct>=90?'A+':pct>=80?'A':pct>=70?'B+':pct>=60?'B':pct>=50?'C':pct>=40?'D':'F';
-    html+=`<div style="margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <div style="font-weight:800;color:var(--primary)">${term}</div>
-        <div style="display:flex;gap:6px"><span class="badge badge-info">${pct}%</span><span class="badge badge-primary">${grade}</span></div>
-      </div>
-      <table style="width:100%;font-size:12px">
-        <thead><tr><th>Subject</th><th>Obtained</th><th>Full Marks</th><th>%</th><th>Grade</th></tr></thead>
-        <tbody>${subjects.map(sub=>{const m=tm[sub];const p=m.total?Math.round((m.obtained||0)/m.total*100):0;const g=p>=90?'A+':p>=80?'A':p>=70?'B+':p>=60?'B':p>=50?'C':p>=40?'D':'F';return`<tr><td>${esc(sub)}</td><td>${m.obtained||0}</td><td>${m.total||0}</td><td>${p}%</td><td><strong>${g}</strong></td></tr>`;}).join('')}</tbody>
-        <tfoot><tr style="background:#f0f4ff"><td colspan="2"><strong>Total: ${total}/${fullTotal}</strong></td><td colspan="2"><strong>Percentage: ${pct}%</strong></td><td><strong>${grade}</strong></td></tr></tfoot>
-      </table>
-    </div>`;
-  });
-  if(st.subjects.length){
-    html+=`<div style="display:flex;flex-wrap:wrap;gap:8px;margin:14px 0;padding:12px;background:#fffbeb;border-radius:10px;border:1px solid #fde68a">
-      <span class="badge" style="background:#1a3a6b;color:#fbbf24">Overall: ${st.ovObt}/${st.ovMax} (${st.ovPct}%)</span>
-      <span class="badge" style="background:${st.ovResult==='PASSED'?'#dcfce7':'#fee2e2'};color:${st.ovResult==='PASSED'?'#15803d':'#b91c1c'}">${st.ovResult}</span>
-      <span class="badge badge-primary">Grade: ${st.ovGrade}</span>
-      ${st.rank?`<span class="badge" style="background:#eff6ff;color:#1e40af">Class Rank: ${st.rank} of ${st.outOf}</span>`:''}
-      <span class="badge" style="background:#f0f4ff;color:#1a3a6b">Attendance: ${st.attText}</span>
-    </div>`;
-  }
-  if(st.devTraits.length){
-    html+=`<div style="margin-bottom:14px">
-      <div style="font-weight:800;color:var(--primary);margin-bottom:6px">Development Profile</div>
-      <table style="width:100%;font-size:12px">
-        <thead><tr><th>Quality</th><th>Term 1</th><th>Term 2</th><th>Term 3</th></tr></thead>
-        <tbody>${st.devTraits.map(t=>`<tr><td>${esc(t)}</td>${st.terms.map(term=>{const g=(st.devByTerm[term]||{})[t];return `<td style="text-align:center">${g?`<strong>${g}</strong>`:'—'}</td>`;}).join('')}</tr>`).join('')}</tbody>
-      </table>
-    </div>`;
-  }
-  html+=`<div style="margin-top:16px;padding-top:16px;border-top:1px dashed var(--border)">
-    <div style="margin-bottom:10px"><div class="text-xs text-muted" style="margin-bottom:3px">Class Teacher Remarks <span style="font-weight:400">(auto-generated — edit before printing if needed)</span></div><div style="font-size:13px;font-weight:600;color:#1a2740;background:#f8faff;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px">${esc(st.remarks.teacher)}</div></div>
-    <div><div class="text-xs text-muted" style="margin-bottom:3px">Principal Remarks</div><div style="font-size:13px;font-weight:600;color:#1a2740;background:#f8faff;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px">${esc(st.remarks.principal)}</div></div>
-  </div></div>`;
-  document.getElementById('reportCardArea').innerHTML=html+`
+  </div>
   <div class="flex gap-8 mt-12 no-print">
     <button class="btn btn-primary" onclick="printReportCardFor('${s.id}')"><i class="fas fa-print"></i> Print Report Card</button>
     <button class="btn btn-outline" onclick="downloadReportCardJPG('${s.id}')"><i class="fas fa-image"></i> Download JPG</button>
@@ -16711,14 +16627,26 @@ function printDueReport(){
     const type = document.getElementById('drType')?.value||'';
     const typeLabel = type==='MonthlyZero' ? 'Monthly Fee — No Payment Since January'
       : type ? type+' Due' : '';
+    const hlCol = type==='Admission' ? 'adm' : (type==='Monthly'||type==='MonthlyZero') ? 'monthly' : type==='Exam' ? 'exam' : '';
+    const hlColIdx = {adm:5, monthly:6, exam:7}[hlCol]; // 0-indexed cell position, matches the header order below
+    const hlStyle = 'border-left:3px solid #dc2626;border-right:3px solid #dc2626;';
     const rows = document.querySelectorAll('#dueReportPrint tbody tr');
+    const rowCount = rows.length;
     let rowsHTML='';
-    rows.forEach(tr=>{ rowsHTML+=`<tr>${[...tr.cells].slice(0,-1).map(td=>`<td>${td.textContent.trim()}</td>`).join('')}</tr>`; });
+    rows.forEach((tr,i)=>{
+      const cells=[...tr.cells].slice(0,-1);
+      const isLast = i===rowCount-1;
+      rowsHTML+=`<tr>${cells.map((td,ci)=>{
+        const hl = ci===hlColIdx ? hlStyle+(isLast?'border-bottom:3px solid #dc2626;':'') : '';
+        return `<td style="${hl}">${td.textContent.trim()}</td>`;
+      }).join('')}</tr>`;
+    });
+    const th = (label,idx) => `<th style="${idx===hlColIdx?hlStyle+'border-top:3px solid #dc2626;':''}">${label}</th>`;
     const body=`
     ${schoolHeaderHTML(`Fee Due Report — Session ${getActiveSession()} ${cls!=='All'?'| '+cls:''}`)}
     ${typeLabel?`<div style="text-align:center;font-size:13px;font-weight:800;color:#c2410c;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px;margin:10px 0 14px">Fee Type: ${esc(typeLabel)}</div>`:''}
     <table>
-      <thead><tr><th>ID</th><th>Name</th><th>Class</th><th>Roll</th><th>Phone</th><th>Adm Due</th><th>Monthly Due</th><th>Exam Due</th><th>Overdue</th><th>Total Due</th></tr></thead>
+      <thead><tr>${th('ID',0)}${th('Name',1)}${th('Class',2)}${th('Roll',3)}${th('Phone',4)}${th('Adm Due',5)}${th('Monthly Due',6)}${th('Exam Due',7)}${th('Overdue',8)}${th('Total Due',9)}</tr></thead>
       <tbody>${rowsHTML}</tbody>
     </table>
     <div class="signatures">
@@ -17176,6 +17104,10 @@ function generateDueReport(){
     if(matchesType && totalDue>0 && (!overdueOnly||overdueAmt>0)) rows.push({s,admDue,monthlyDue,examDue,overdueAmt,totalDue});
   });
   const typeLabel = type==='MonthlyZero' ? 'Monthly Fee — No Payment Since January' : (type ? type+' Due' : '');
+  // Which due column to highlight with a red border, top to bottom, on both
+  // screen and print, so it's obvious at a glance which fee type this list is about.
+  const hlCol = type==='Admission' ? 'adm' : (type==='Monthly'||type==='MonthlyZero') ? 'monthly' : type==='Exam' ? 'exam' : '';
+  const hlStyle = 'border-left:3px solid #dc2626;border-right:3px solid #dc2626;';
   const totalAll=rows.reduce((a,r)=>a+r.totalDue,0);
   document.getElementById('dueReportResult').innerHTML=`
   <div class="card" id="dueReportPrint">
@@ -17185,20 +17117,27 @@ function generateDueReport(){
       ${type?`<div style="padding:12px;background:#fff7ed;border-radius:10px"><div class="text-xs text-muted">${esc(typeLabel)}</div><div style="font-size:20px;font-weight:900;color:#c2410c">₹${rows.reduce((a,r)=>a+(type==='Admission'?r.admDue:(type==='Monthly'||type==='MonthlyZero')?r.monthlyDue:r.examDue),0).toLocaleString()}</div></div>`:''}
       <div style="padding:12px;background:#f8faff;border-radius:10px"><div class="text-xs text-muted">Students with Due</div><div style="font-size:20px;font-weight:900;color:var(--primary)">${rows.length}</div></div>
     </div>
-    ${typeLabel?`<div class="text-xs text-muted" style="margin:-8px 0 12px 2px">Showing students matching "${esc(typeLabel)}" — each row still shows their full Admission/Monthly/Exam breakdown.</div>`:''}
+    ${typeLabel?`<div class="text-xs text-muted" style="margin:-8px 0 12px 2px">Showing students matching "${esc(typeLabel)}" — each row still shows their full Admission/Monthly/Exam breakdown. The <span style="color:#dc2626;font-weight:800">red-bordered column</span> is the one you filtered by.</div>`:''}
     <div class="table-wrap"><table>
-      <thead><tr><th>ID</th><th>Name</th><th>Class</th><th>Roll</th><th>Phone</th><th>Adm Due</th><th>Monthly Due</th><th>Exam Due</th><th>Overdue</th><th>Total</th><th class="no-print">WA</th></tr></thead>
+      <thead><tr><th>ID</th><th>Name</th><th>Class</th><th>Roll</th><th>Phone</th>
+        <th style="${hlCol==='adm'?hlStyle+'border-top:3px solid #dc2626':''}">Adm Due</th>
+        <th style="${hlCol==='monthly'?hlStyle+'border-top:3px solid #dc2626':''}">Monthly Due</th>
+        <th style="${hlCol==='exam'?hlStyle+'border-top:3px solid #dc2626':''}">Exam Due</th>
+        <th>Overdue</th><th>Total</th><th class="no-print">WA</th></tr></thead>
       <tbody>
-        ${rows.map(r=>`<tr>
+        ${rows.map((r,i)=>{
+          const isLast = i===rows.length-1;
+          const bColor = isLast ? 'border-bottom:3px solid #dc2626;' : '';
+          return `<tr>
           <td>${r.s.studentId}</td><td><strong>${esc(r.s.name)}</strong></td>
           <td>${r.s.class}</td><td>${r.s.roll}</td><td>${r.s.phone||'—'}</td>
-          <td class="${r.admDue?'red-text':''}">${r.admDue?'₹'+r.admDue:'—'}</td>
-          <td class="${r.monthlyDue?'red-text':''}">${r.monthlyDue?'₹'+r.monthlyDue:'—'}</td>
-          <td class="${r.examDue?'red-text':''}">${r.examDue?'₹'+r.examDue:'—'}</td>
+          <td class="${r.admDue?'red-text':''}" style="${hlCol==='adm'?hlStyle+bColor:''}">${r.admDue?'₹'+r.admDue:'—'}</td>
+          <td class="${r.monthlyDue?'red-text':''}" style="${hlCol==='monthly'?hlStyle+bColor:''}">${r.monthlyDue?'₹'+r.monthlyDue:'—'}</td>
+          <td class="${r.examDue?'red-text':''}" style="${hlCol==='exam'?hlStyle+bColor:''}">${r.examDue?'₹'+r.examDue:'—'}</td>
           <td class="${r.overdueAmt?'gold-text font-bold':''}">${r.overdueAmt?'₹'+r.overdueAmt:'—'}</td>
           <td><strong>₹${r.totalDue}</strong></td>
           <td class="no-print"><button class="btn btn-xs btn-success" onclick="sendWhatsApp('due','${r.s.id}')"><i class="fab fa-whatsapp"></i></button></td>
-        </tr>`).join('')||'<tr><td colspan="11" class="text-center text-muted" style="padding:24px">No dues found ✓</td></tr>'}
+        </tr>`;}).join('')||'<tr><td colspan="11" class="text-center text-muted" style="padding:24px">No dues found ✓</td></tr>'}
       </tbody>
     </table></div>
   </div>`;
@@ -20010,24 +19949,8 @@ function analyzePerformance(){
 //  V6-6: FINAL REPORT CARD PRINT (definitive version)
 //  Single clean table: Subject | T1 obt | T1 full | T1% | T2... | T3... | Final%
 // ─────────────────────────────────────────────────────
-function buildReportCardDocHTML(studentId, silent){
-  const students=ls('students')||[]; const s=students.find(x=>x.id===studentId);
-  if(!s){ if(!silent) toast('Student not found','error'); return null;}
-  const st=rcComputeStats(s, s.session||getActiveSession());
-  const sm=st.sm, terms=st.terms, subjects=st.subjects;
-  if(!subjects.length){ if(!silent) toast('No marks data to print','error'); return null;}
-
-  const termTotals=st.termTotals, termMaxes=st.termMaxes;
-  const ovObt=st.ovObt, ovMax=st.ovMax, ovPct=st.ovPct, ovGrade=st.ovGrade, ovResult=st.ovResult, attText=st.attText;
-  const rankText = st.rank ? `Rank ${st.rank} of ${st.outOf}` : '—';
-  const devPillColor = g => g==='A'?'background:#e7f6ec;color:#1e7a3d':g==='B'?'background:#e6f0fb;color:#1e56a8':g==='C'?'background:#fdf3d9;color:#93700a':g==='D'?'background:#fbe7e7;color:#a3272a':'background:#eef1f6;color:#98a2b3';
-  const fmt=v=>(v===null||v===undefined)?'—':v;
-  const termPosText = term => st.termRank[term] ? `Rank ${st.termRank[term]} of ${st.termOutOf[term]}` : '—';
-
-  return `<!DOCTYPE html><html><head><title>Report Card — ${s.name}</title>
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700;800;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <style>
+function reportCardSheetCSS(){
+  return `
     @page{size:A4 portrait;margin:0}
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Nunito',sans-serif;color:#1e2a3b;background:#fff;font-size:11px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -20035,7 +19958,7 @@ function buildReportCardDocHTML(studentId, silent){
       html,body{width:210mm;height:297mm}
       body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
     }
-    .sheet{width:210mm;height:297mm;padding:7mm;display:flex}
+    .sheet{width:210mm;height:297mm;padding:7mm;display:flex;page-break-after:always}
     .frame{border:1.5px solid #17325c;border-radius:6px;position:relative;flex:1;display:flex;min-width:0}
     .frame::after{content:'';position:absolute;top:3px;left:3px;right:3px;bottom:3px;border:1px solid #c9a84c;border-radius:4px;pointer-events:none}
     .inner{padding:8px 14px 6px;flex:1;display:flex;flex-direction:column;min-width:0}
@@ -20054,7 +19977,7 @@ function buildReportCardDocHTML(studentId, silent){
     .stu-it{display:flex;align-items:baseline;gap:6px;border-bottom:1px dotted #e2e8f0;padding-bottom:2px}
     .stu-it i{color:#c9a84c;font-size:9.5px;width:13px;text-align:center;flex-shrink:0}
     .stu-it .l{font-size:7.3px;color:#8492a6;font-weight:800;text-transform:uppercase;letter-spacing:.3px;min-width:74px}
-    .stu-it .v{font-size:10px;font-weight:800;color:#17325c}
+    .stu-it .v{font-size:10px;font-weight:800;color:#17325c;border-bottom:1px solid #c7d2e3;min-width:60px;display:inline-block}
     .sec-hdr{background:#17325c;color:#fff;font-size:8.7px;font-weight:800;text-transform:uppercase;letter-spacing:1px;padding:4px 10px;border-radius:5px 5px 0 0;display:flex;align-items:center;gap:6px}
     .sec-hdr i{color:#f0c94e}
     table.mt{width:100%;border-collapse:separate;border-spacing:0;border:1.5px solid #17325c;border-top:none;font-size:10.3px}
@@ -20062,7 +19985,7 @@ function buildReportCardDocHTML(studentId, silent){
     table.mt th{padding:6px 3px;text-align:center;font-size:9px;text-transform:uppercase;border-right:1px solid rgba(255,255,255,.14);white-space:nowrap}
     table.mt th:first-child{text-align:left;padding-left:8px;min-width:76px}
     table.mt th:last-child{border-right:none}
-    table.mt td{padding:5.5px 3px;text-align:center;border-bottom:1px solid #eef1f6;border-right:1px solid #eef1f6}
+    table.mt td{padding:9px 3px;text-align:center;border-bottom:1px solid #eef1f6;border-right:1px solid #eef1f6}
     table.mt td:first-child{text-align:left;font-weight:800;padding-left:8px;color:#17325c;font-size:10.7px}
     table.mt td:last-child{border-right:none}
     table.mt tbody tr:last-child td{border-bottom:none}
@@ -20095,7 +20018,37 @@ function buildReportCardDocHTML(studentId, silent){
     .sn{font-size:7.5px;color:#5b6b84;font-weight:800}
     .footer{margin-top:8px;background:linear-gradient(90deg,#17325c,#1e4373);color:#dfe6f0;text-align:center;padding:5px;border-radius:4px;font-size:7px}
     .footer b{color:#f0c94e}
-  </style></head><body>
+  `;
+}
+function reportCardDocHead(title){
+  return `<head><title>${esc(title)}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>${reportCardSheetCSS()}</style></head>`;
+}
+function buildReportCardDocHTML(studentId, silent){
+  const students=ls('students')||[]; const s=students.find(x=>x.id===studentId);
+  if(!s){ if(!silent) toast('Student not found','error'); return null;}
+  const st=rcComputeStats(s, s.session||getActiveSession());
+  if(!st.subjects.length){ if(!silent) toast('No marks data to print','error'); return null;}
+  return `<!DOCTYPE html><html>${reportCardDocHead('Report Card — '+s.name)}<body>
+  ${reportCardSheetInnerHTML(s,st)}
+  </body></html>`;
+}
+// The actual filled-in report card sheet — used by BOTH the single
+// View/Print/Download-JPG flow (buildReportCardDocHTML) and the bulk
+// per-class print (printAllReportCards), so a single card and a bulk
+// class printout always look identical.
+function reportCardSheetInnerHTML(s, st){
+  const sm=st.sm, terms=st.terms, subjects=st.subjects;
+  const termTotals=st.termTotals, termMaxes=st.termMaxes;
+  const ovObt=st.ovObt, ovMax=st.ovMax, ovPct=st.ovPct, ovGrade=st.ovGrade, ovResult=st.ovResult, attText=st.attText;
+  const rankText = st.rank ? `Rank ${st.rank} of ${st.outOf}` : '—';
+  const devPillColor = g => g==='A'?'background:#e7f6ec;color:#1e7a3d':g==='B'?'background:#e6f0fb;color:#1e56a8':g==='C'?'background:#fdf3d9;color:#93700a':g==='D'?'background:#fbe7e7;color:#a3272a':'background:#eef1f6;color:#98a2b3';
+  const fmt=v=>(v===null||v===undefined)?'—':v;
+  const termPosText = term => st.termRank[term] ? `Rank ${st.termRank[term]} of ${st.termOutOf[term]}` : '—';
+
+  return `
   <div class="sheet"><div class="frame"><div class="inner">
     <div class="ribbon">SESSION <span class="yr">${s.session}</span></div>
 
@@ -20213,8 +20166,124 @@ function buildReportCardDocHTML(studentId, silent){
     </div>
 
     <div class="footer"><b>${esc(SCHOOL.name)}</b> &nbsp;·&nbsp; ${esc(SCHOOL.address)} &nbsp;·&nbsp; Computer-generated Report Card</div>
-  </div></div></div>
+  </div></div></div>`;
+}
+
+// ── Blank version of the SAME design above — same .sheet/.frame/.inner
+// markup and the SAME reportCardSheetCSS(), so a blank card looks exactly
+// like a real one except every field the teacher would fill in by hand is
+// an empty underlined box instead. Subjects come from the class's actual
+// exam-register config (getExamRegisterSubjectNames), not from marks —
+// works even when no marks exist yet.
+function blankReportCardSheetInnerHTML(s, session, subjects, terms){
+  const v = val => val ? esc(String(val)) : '&nbsp;';
+  return `<div class="sheet"><div class="frame"><div class="inner">
+    <div class="ribbon">SESSION <span class="yr">${esc(String(session||''))}</span></div>
+    <div class="hdr">
+      <div class="logo">${SCHOOL.logo?`<img src="${SCHOOL.logo}">`:'<i class="fas fa-graduation-cap" style="font-size:19px;color:#17325c"></i>'}</div>
+      <div class="sname">${esc(SCHOOL.name)}</div>
+      <div class="saddr">${esc(SCHOOL.address)}</div>
+      <div class="estd">K.G. &amp; Primary School</div>
+    </div>
+    <div class="titlebar"><div class="ttl">Progress Report Card</div><div class="gline"></div></div>
+    <div class="stu-panel">
+      <div class="stu-it"><i class="fas fa-user-graduate"></i><span class="l">Student Name</span><span class="v">${v(s&&s.name)}</span></div>
+      <div class="stu-it"><i class="fas fa-male"></i><span class="l">Father's Name</span><span class="v">${v(s&&s.fatherName)}</span></div>
+      <div class="stu-it"><i class="fas fa-chalkboard"></i><span class="l">Class</span><span class="v">${v(s&&s.class)}</span></div>
+      <div class="stu-it"><i class="fas fa-hashtag"></i><span class="l">Roll No.</span><span class="v">${v(s&&s.roll)}</span></div>
+      <div class="stu-it"><i class="fas fa-id-card"></i><span class="l">Student ID</span><span class="v">${v(s&&s.studentId)}</span></div>
+      <div class="stu-it"><i class="fas fa-calendar-check"></i><span class="l">Attendance</span><span class="v">&nbsp;</span></div>
+    </div>
+    <div class="sec-hdr"><i class="fas fa-book-open"></i>Academic Performance — All Terms</div>
+    <table class="mt">
+      <thead>
+        <tr><th rowspan="2">Subject</th><th colspan="5">Term 1</th><th colspan="5" style="border-left:1px solid rgba(255,255,255,.3)">Term 2</th><th colspan="5" style="border-left:1px solid rgba(255,255,255,.3)">Term 3</th></tr>
+        <tr class="sub-hdr"><th>Full</th><th>Oral</th><th>Writing</th><th>Total</th><th>Highest</th><th>Full</th><th>Oral</th><th>Writing</th><th>Total</th><th>Highest</th><th>Full</th><th>Oral</th><th>Writing</th><th>Total</th><th>Highest</th></tr>
+      </thead>
+      <tbody>${(subjects.length?subjects:['','','','','','']).map(sub=>`<tr><td>${sub?esc(sub):'&nbsp;'}</td>${terms.map(()=>'<td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>').join('')}</tr>`).join('')}</tbody>
+      <tfoot>
+        <tr class="gtot"><td>GRAND TOTAL</td><td colspan="5">&nbsp;</td><td colspan="5">&nbsp;</td><td colspan="5">&nbsp;</td></tr>
+        <tr class="postot"><td>POSITION</td><td colspan="5">&nbsp;</td><td colspan="5">&nbsp;</td><td colspan="5">&nbsp;</td></tr>
+      </tfoot>
+    </table>
+    <div class="sum-wrap">
+      <div class="sec-hdr" style="border-radius:0"><i class="fas fa-chart-line"></i>Overall Performance Summary</div>
+      <div class="sum-panel">
+        <div class="sum-item"><div class="sum-badge"><i class="fas fa-star-of-life" style="font-size:9.5px"></i></div><div class="sum-l">Total Obtained</div><div class="sum-v">&nbsp;</div></div>
+        <div class="sum-item"><div class="sum-badge"><i class="fas fa-percent" style="font-size:9.5px"></i></div><div class="sum-l">Percentage</div><div class="sum-v">&nbsp;</div></div>
+        <div class="sum-item"><div class="sum-badge"><i class="fas fa-award" style="font-size:9.5px"></i></div><div class="sum-l">Grade</div><div class="sum-v">&nbsp;</div></div>
+        <div class="sum-item"><div class="sum-badge"><i class="fas fa-check" style="font-size:9.5px"></i></div><div class="sum-l">Result</div><div class="sum-v">&nbsp;</div></div>
+        <div class="sum-item"><div class="sum-badge"><i class="fas fa-trophy" style="font-size:9.5px"></i></div><div class="sum-l">Class Rank</div><div class="sum-v" style="font-size:9.5px">&nbsp;</div></div>
+      </div>
+    </div>
+    <div class="two-col">
+      <div class="panel">
+        <div class="sec-hdr"><i class="fas fa-seedling"></i>Development Profile</div>
+        <div class="panel-body"><table class="dt"><tbody>${[1,2,3,4].map(()=>`<tr><td>&nbsp;</td><td style="text-align:center;width:24px">&nbsp;</td><td style="text-align:center;width:24px">&nbsp;</td><td style="text-align:center;width:24px">&nbsp;</td></tr>`).join('')}</tbody></table></div>
+      </div>
+      <div class="panel">
+        <div class="sec-hdr"><i class="fas fa-comment-dots"></i>Remarks</div>
+        <div class="panel-body">
+          <div class="rmk-txt" style="min-height:28px">&nbsp;</div><div class="rmk-by">— Class Teacher</div>
+          <div class="rmk-txt" style="margin-top:6px;min-height:28px">&nbsp;</div><div class="rmk-by">— Principal</div>
+        </div>
+      </div>
+    </div>
+    <div class="sig-row">
+      <div class="sigb"><div class="sigl"></div><div class="sn">Class Teacher</div></div>
+      <div class="sigb"><div class="sigl"></div><div class="sn">Headmaster / Principal</div></div>
+      <div class="sigb"><div class="sigl"></div><div class="sn">Parent / Guardian</div></div>
+    </div>
+    <div class="footer"><b>${esc(SCHOOL.name)}</b> &nbsp;·&nbsp; ${esc(SCHOOL.address)} &nbsp;·&nbsp; Blank template — for hand-written entry</div>
+  </div></div></div>`;
+}
+function buildBlankReportCardDocHTML(studentId){
+  const session=getActiveSession();
+  const terms=['Term 1','Term 2','Term 3'];
+  let s=null, subjects=[];
+  if(studentId){
+    s=(ls('students')||[]).find(x=>x.id===studentId);
+    if(s) subjects=getExamRegisterSubjectNames(s.class)||[];
+  }
+  return `<!DOCTYPE html><html>${reportCardDocHead('Blank Report Card'+(s?' — '+s.name:''))}<body>
+    ${blankReportCardSheetInnerHTML(s,session,subjects,terms)}
   </body></html>`;
+}
+function previewBlankReportCard(studentId){
+  const html=buildBlankReportCardDocHTML(studentId);
+  const students=ls('students')||[]; const s=studentId?students.find(x=>x.id===studentId):null;
+  openModal(s?`Blank Report Card — ${esc(s.name)}`:'Blank Report Card Template', `
+    <div style="background:#e9edf5;padding:14px;overflow:auto;max-height:70vh">
+      <div style="transform:scale(.62);transform-origin:top left;width:161%;margin-bottom:-38%">
+        <iframe style="width:210mm;height:297mm;border:none;pointer-events:none" srcdoc="${html.replace(/"/g,'&quot;')}"></iframe>
+      </div>
+    </div>
+  `, [
+    {label:'<i class="fas fa-print"></i> Print',cls:'btn-primary',onclick:`printBlankReportCardFor(${studentId?`'${studentId}'`:'null'})`},
+    {label:'<i class="fas fa-image"></i> Download JPG',cls:'btn-outline',onclick:`downloadBlankReportCardJPG(${studentId?`'${studentId}'`:'null'})`},
+    {label:'Close',cls:'btn-outline',onclick:'closeModal()'}
+  ],'modal-lg');
+}
+function printBlankReportCardFor(studentId){
+  const html=buildBlankReportCardDocHTML(studentId);
+  const w=window.open('','_blank');
+  w.document.write(html);
+  w.document.close(); w.focus(); setTimeout(()=>{w.print();w.close();},500);
+}
+function downloadBlankReportCardJPG(studentId){
+  const html=buildBlankReportCardDocHTML(studentId);
+  const students=ls('students')||[]; const s=studentId?students.find(x=>x.id===studentId):null;
+  toast('Preparing JPG…');
+  ensureHtml2Canvas(()=>{
+    renderReportCardToJpegBlob(html).then(blob=>{
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url; a.download=`BlankReportCard_${(s?s.name:'Template').replace(/\s+/g,'_')}.jpg`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast('Blank report card JPG downloaded!');
+    }).catch(()=>{ toast('Could not generate JPG — try Print instead','error'); });
+  });
 }
 
 function printReportCardFor(studentId){
