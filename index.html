@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7317,8 +7316,6 @@ function printFeeRegister(){
       <td class="${t.admTotal<=0?'na':(t.admDue<=0?'ok':'due')}">${admCell}</td>
       ${monthCells}
       ${examCells}
-      <td class="paidcol">₹${t.totalPaid}</td>
-      <td class="duecol">₹${t.totalDue}</td>
     </tr>`;
   }).join('');
 
@@ -7326,21 +7323,27 @@ function printFeeRegister(){
     ${schoolHeaderHTML(`Fee Register — ${esc(cls)}, Session ${esc(session)}`)}
     <div class="frp-meta">Class: <b>${esc(cls)}</b> &nbsp;|&nbsp; Session: <b>${esc(session)}</b> &nbsp;|&nbsp; Total Students: <b>${students.length}</b> &nbsp;|&nbsp; Print Date: <b>${esc(fmtDate(today()))}</b></div>
     <table class="frp-table">
+      <colgroup>
+        <col style="width:4%">
+        <col style="width:17%">
+        <col style="width:5%">
+        ${MONTHS.map(()=>'<col style="width:4.8%">').join('')}
+        ${examTerms.map(()=>'<col style="width:5%">').join('')}
+      </colgroup>
       <thead>
         <tr>
           <th rowspan="2">Roll</th><th rowspan="2">Name</th><th rowspan="2">Adm</th>
           <th colspan="12">Monthly Fee</th>
           <th colspan="3">Exam</th>
-          <th rowspan="2">Paid</th><th rowspan="2">Due</th>
         </tr>
         <tr>${MONTHS.map(m=>`<th class="sm">${m}</th>`).join('')}${examTerms.map(t=>`<th class="sm">${t.replace('Term ','T')}</th>`).join('')}</tr>
       </thead>
       <tbody>${rowsHTML}</tbody>
       <tfoot>
         <tr class="grand">
-          <td colspan="18" style="text-align:right">GRAND TOTAL &nbsp;→</td>
-          <td class="paidcol">₹${grandPaid}</td>
-          <td class="duecol">₹${grandDue}</td>
+          <td colspan="3" style="text-align:right">GRAND TOTAL &nbsp;→</td>
+          <td colspan="12" style="text-align:left;padding-left:8px;color:#86efac">Total Paid: ₹${grandPaid}</td>
+          <td colspan="3" style="text-align:left;padding-left:4px;color:#fca5a5">Total Due: ₹${grandDue}</td>
         </tr>
       </tfoot>
     </table>
@@ -7352,19 +7355,16 @@ function printFeeRegister(){
     <style>
       @page{size:A4 landscape;margin:9mm}
       .frp-meta{font-size:11px;margin:6px 0 10px;text-align:center;color:#334155}
-      table.frp-table{width:100%;border-collapse:collapse;font-size:8.3px;table-layout:fixed}
+      table.frp-table{width:100%;border-collapse:collapse;font-size:8.6px;table-layout:fixed}
       table.frp-table th,table.frp-table td{border:1px solid #b9c3d4;padding:3px 2px;text-align:center}
       table.frp-table th{background:#1a3a6b;color:#fff;font-size:8px;text-transform:uppercase}
       table.frp-table th.sm{font-size:7.3px;padding:2.5px 1px}
-      table.frp-table td.name{text-align:left;padding-left:4px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px}
+      table.frp-table td.name{text-align:left;padding-left:4px;font-weight:700;white-space:normal;word-break:break-word}
       table.frp-table td.ok{color:#15803d;font-weight:900}
       table.frp-table td.due{color:#b91c1c;font-weight:800}
       table.frp-table td.na{color:#c3cad6}
-      table.frp-table td.paidcol{color:#15803d;font-weight:800;background:#f0fdf4}
-      table.frp-table td.duecol{color:#b91c1c;font-weight:800;background:#fef2f2}
       table.frp-table tbody tr:nth-child(even){background:#f8faff}
-      table.frp-table tfoot tr.grand td{background:#1a3a6b;color:#fff;font-weight:900;font-size:10px;padding:6px 4px}
-      table.frp-table tfoot tr.grand td.paidcol,table.frp-table tfoot tr.grand td.duecol{background:#1a3a6b;color:#f0c94e}
+      table.frp-table tfoot tr.grand td{background:#1a3a6b;color:#fff;font-weight:900;font-size:10.5px;padding:7px 4px}
       .frp-legend{font-size:9px;margin-top:8px;color:#475569}
       .frp-legend .ok{color:#15803d;font-weight:900}
       .frp-legend .due{color:#b91c1c;font-weight:800}
@@ -15574,224 +15574,316 @@ function printRoutine(){
 function renderMonthlyAttendance(){
   const classes   = getAllClasses();
   const session   = getActiveSession();
-  const cm        = currMonth();
   return `
   <div class="section-header">
     <div class="section-title"><i class="fas fa-clipboard-list" style="color:var(--gold)"></i> Monthly Attendance Entry</div>
     <div class="flex gap-8">
-      <button class="btn btn-primary no-print" onclick="printMonthlyAtt()"><i class="fas fa-print"></i> Print</button>
+      <button class="btn btn-outline no-print" onclick="openQuickFillMonth()"><i class="fas fa-bolt"></i> Quick Fill a Month</button>
+      <button class="btn btn-primary no-print" onclick="printYearlyAttendanceRegister()"><i class="fas fa-print"></i> Print</button>
     </div>
   </div>
 
   <div class="card">
-    <div class="form-row three" style="align-items:flex-end">
+    <div class="form-row" style="align-items:flex-end">
       <div class="form-group"><label>Select Class</label>
         <select id="maClass">${classes.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select>
       </div>
-      <div class="form-group"><label>Select Month</label>
-        <select id="maMonth">
-          ${MONTHS.map((m,i)=>`<option value="${i}" ${i===cm?'selected':''}>${m} ${session}</option>`).join('')}
-        </select>
-      </div>
       <div class="form-group">
-        <button class="btn btn-primary w-full" onclick="loadMonthlyAttendance()"><i class="fas fa-users"></i> Load Students</button>
+        <button class="btn btn-primary w-full" onclick="loadAttendanceYearGrid()"><i class="fas fa-users"></i> Load Attendance Grid</button>
       </div>
     </div>
-    <div class="form-group" style="margin-top:8px">
-      <label>Total Working Days for this Month</label>
-      <input type="number" id="maWorkingDays" value="26" min="1" max="31" style="max-width:160px;padding:8px;border:2px solid var(--border);border-radius:8px;font-family:'Nunito',sans-serif">
-      <span class="text-muted text-sm" style="margin-left:8px">(Applied to all students — you can override per student)</span>
-    </div>
+    <div class="text-xs text-muted" style="margin-top:4px">Click any month cell in the grid below to enter or edit that student's attendance for that month — no need to pick a month first.</div>
   </div>
 
-  <div id="monthlyAttGrid" style="display:none">
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px">
-        <div class="card-title" style="margin:0"><i class="fas fa-table"></i> Attendance — <span id="maLabel"></span></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-sm btn-success" onclick="fillAllPresent()"><i class="fas fa-check"></i> Set All Full Present</button>
-          <button class="btn btn-sm btn-primary" onclick="saveMonthlyAtt()"><i class="fas fa-save"></i> Save</button>
-        </div>
-      </div>
-      <!-- Summary Stats -->
-      <div id="maSummaryBanner" style="margin-bottom:14px"></div>
-      <div class="table-wrap">
-        <table id="maTable">
-          <thead>
-            <tr>
-              <th style="min-width:40px">#</th>
-              <th style="min-width:160px">Student Name</th>
-              <th>Roll</th>
-              <th style="min-width:100px">Working Days</th>
-              <th style="min-width:100px">Present Days</th>
-              <th style="min-width:80px">Absent</th>
-              <th style="min-width:80px">Att %</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody id="maTableBody"></tbody>
-        </table>
-      </div>
-      <div class="flex gap-8 mt-12">
-        <button class="btn btn-primary" onclick="saveMonthlyAtt()"><i class="fas fa-save"></i> Save Attendance</button>
-      </div>
+  <div id="monthlyAttGrid" style="display:none;margin-top:16px"></div>`;
+}
+
+// ── Editable 12-month grid (replaces the old "pick a month, load, fill a
+// single-month table" flow) — one screen, every month, click a cell to
+// enter that student+month's Working/Present Days. Same monthlyAtt store
+// as before (monthlyAtt[session_class_month][studentId]), just a different,
+// friendlier way of entering it. Shares its data with the Fee-Register-style
+// printable register (printYearlyAttendanceRegister). ──
+function loadAttendanceYearGrid(){
+  const cls = document.getElementById('maClass')?.value;
+  const session = getActiveSession();
+  if(!cls){ toast('Select a class first','error'); return; }
+  const students = (ls('students')||[]).filter(s=>s.session===session&&s.class===cls).sort((a,b)=>(a.roll||0)-(b.roll||0));
+  if(!students.length){ toast('No students in this class','error'); return; }
+  window._maCurrentClass = cls;
+  document.getElementById('monthlyAttGrid').style.display='block';
+  document.getElementById('monthlyAttGrid').innerHTML = `
+  <style>
+    #yarCard{overflow:hidden}
+    #yarScroll{overflow-x:auto;border:1px solid #dde4f0;border-radius:10px}
+    table#yarTable{width:100%;border-collapse:collapse;font-size:12.5px;min-width:1100px;table-layout:fixed}
+    table#yarTable th,table#yarTable td{border:1px solid #e6ebf4;text-align:center}
+    table#yarTable thead tr.yar-head th{background:#1a3a6b;color:#fff;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;padding:9px 6px;white-space:nowrap}
+    table#yarTable thead tr.yar-wd-row th{background:#fdf6e3;padding:5px 3px;border-top:none}
+    table#yarTable thead tr.yar-wd-row .yar-wd-label{text-align:right;font-size:10px;color:#8a6d1f;font-weight:800;padding-right:10px;white-space:nowrap}
+    table#yarTable td{padding:0;background:#fff}
+    table#yarTable tbody tr:nth-child(even) td{background:#f8faff}
+    table#yarTable tbody tr:hover td{background:#eef4ff}
+    table#yarTable td.yar-roll,table#yarTable td.yar-name{padding:8px 10px;font-weight:700;color:#1a3a6b}
+    table#yarTable td.yar-name{text-align:left;white-space:normal;word-break:break-word;line-height:1.3}
+    table#yarTable td.yar-wd{padding:8px 4px;font-weight:700;color:#6b7a99}
+    table#yarTable td.yar-total{padding:8px 4px;font-weight:800;color:#1a3a6b}
+    table#yarTable td.yar-pct{padding:6px 4px}
+    /* sticky roll + name columns so they stay visible while scrolling through months */
+    table#yarTable th:nth-child(1),table#yarTable td:nth-child(1){position:sticky;left:0;z-index:2}
+    table#yarTable th:nth-child(2),table#yarTable td:nth-child(2){position:sticky;left:42px;z-index:2;box-shadow:2px 0 4px rgba(0,0,0,.05)}
+    table#yarTable thead th:nth-child(1),table#yarTable thead th:nth-child(2){z-index:3}
+    .yar-cell-in{width:100%;height:100%;min-height:32px;border:none;background:transparent;text-align:center;font-size:12px;font-weight:800;padding:8px 2px;font-family:inherit;color:inherit}
+    .yar-cell-in:focus{outline:2px solid #1a3a6b;outline-offset:-2px;background:#fff}
+    td.yar-month{cursor:text}
+    td.yar-month.ok{background:#e8f8ee}
+    td.yar-month.ok .yar-cell-in{color:#15803d}
+    td.yar-month.mid{background:#fff8e1}
+    td.yar-month.mid .yar-cell-in{color:#a16207}
+    td.yar-month.low{background:#fdeeee}
+    td.yar-month.low .yar-cell-in{color:#b91c1c}
+    td.yar-month.na .yar-cell-in{color:#c3cad6}
+    .yar-wd-input{width:100%;padding:6px 2px;text-align:center;border:1.5px solid #e9d8a6;border-radius:6px;font-size:12px;font-weight:800;color:#8a6d1f;background:#fffdf5;font-family:inherit}
+    .yar-wd-input:focus{outline:none;border-color:#c9a84c;background:#fff}
+    .yar-legend-chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#475569;margin-right:14px}
+    .yar-legend-dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+  </style>
+  <div class="card" id="yarCard">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+      <div class="card-title" style="margin:0"><i class="fas fa-calendar-alt"></i> ${esc(cls)} — Session ${esc(session)}</div>
+    </div>
+    <div style="margin-bottom:10px" class="no-print">
+      <span class="yar-legend-chip"><span class="yar-legend-dot" style="background:#22c55e"></span>85%+</span>
+      <span class="yar-legend-chip"><span class="yar-legend-dot" style="background:#eab308"></span>75–84%</span>
+      <span class="yar-legend-chip"><span class="yar-legend-dot" style="background:#ef4444"></span>Below 75%</span>
+      <span class="yar-legend-chip"><span class="yar-legend-dot" style="background:#e2e8f0"></span>Not entered</span>
+      <span class="yar-legend-chip" style="margin-left:6px">✏️ Type Present Days directly into a month cell to enter or edit it</span>
+    </div>
+    <div id="yarScroll">
+      <table id="yarTable">
+        <colgroup>
+          <col style="width:42px"><col style="width:140px"><col style="width:70px">
+          ${MONTHS.map(()=>'<col style="width:56px">').join('')}
+          <col style="width:60px"><col style="width:64px">
+        </colgroup>
+        <thead>
+          <tr class="yar-head">
+            <th>Roll</th><th style="text-align:left;padding-left:10px">Student Name</th><th>Working<br>Days</th>${MONTHS.map(m=>`<th>${m}</th>`).join('')}<th>Total<br>Present</th><th>Overall<br>%</th>
+          </tr>
+          <tr class="yar-wd-row no-print">
+            <th colspan="3" class="yar-wd-label">Set Working Days for whole class →</th>
+            ${MONTHS.map((_,m)=>`<th><input type="number" class="yar-wd-input wd-header-input" data-month="${m}" min="0" max="31" placeholder="26" value="${getClassWorkingDaysForMonth(m)}" onchange="setClassWorkingDaysForMonth(${m},this.value)"></th>`).join('')}
+            <th colspan="2"></th>
+          </tr>
+        </thead>
+        <tbody id="yarTableBody"></tbody>
+      </table>
     </div>
   </div>`;
+  renderAttendanceGridRows();
 }
-
-function loadMonthlyAttendance(){
-  const cls     = document.getElementById('maClass')?.value;
-  const month   = parseInt(document.getElementById('maMonth')?.value||0);
+// Current class-wide working-days value for a month, for pre-filling the
+// header input — takes whichever student's record was entered first (they
+// should normally all match, since working days is a class-wide number).
+function getClassWorkingDaysForMonth(monthIdx){
+  const cls = window._maCurrentClass;
   const session = getActiveSession();
-  const working = parseInt(document.getElementById('maWorkingDays')?.value||26);
-  const students= (ls('students')||[]).filter(s=>s.session===session&&s.class===cls).sort((a,b)=>a.roll-b.roll);
-  if(!students.length){ toast('No students in this class','error'); return; }
-
-  const monthlyAtt = ls('monthlyAtt')||{};
-  const key = `${session}_${cls}_${month}`;
-  const saved = monthlyAtt[key]||{};
-
-  document.getElementById('monthlyAttGrid').style.display='block';
-  document.getElementById('maLabel').textContent=`${cls} — ${MONTHS_FULL[month]} ${session}`;
-
-  document.getElementById('maTableBody').innerHTML = students.map((s,idx)=>{
-    const rec  = saved[s.id]||{working,present:working,absent:0};
-    const pct  = rec.working>0 ? Math.round(rec.present/rec.working*100) : 0;
-    const low  = pct < 75;
-    return `<tr id="maRow_${s.id}" style="${low?'background:#fff5f5':''}">
-      <td>${idx+1}</td>
-      <td style="font-weight:700">${esc(s.name)}</td>
-      <td>${s.roll}</td>
-      <td><input type="number" id="maW_${s.id}" value="${rec.working}" min="0" max="31"
-          style="width:70px;padding:5px;border:1.5px solid var(--border);border-radius:6px;font-family:'Nunito',sans-serif;text-align:center"
-          oninput="recalcRow('${s.id}')"></td>
-      <td><input type="number" id="maP_${s.id}" value="${rec.present}" min="0" max="${rec.working}"
-          style="width:70px;padding:5px;border:1.5px solid var(--border);border-radius:6px;font-family:'Nunito',sans-serif;text-align:center"
-          oninput="recalcRow('${s.id}')"></td>
-      <td id="maA_${s.id}" style="font-weight:700;color:${rec.absent?'#b91c1c':'#15803d'}">${rec.absent}</td>
-      <td id="maPct_${s.id}"><span class="badge ${low?'badge-danger':pct<85?'badge-warning':'badge-success'}">${pct}%</span></td>
-      <td id="maStatus_${s.id}"><span class="badge ${low?'badge-danger':'badge-success'}">${low?'⚠️ Low':'✓ OK'}</span></td>
-    </tr>`;
-  }).join('');
-  renderMASummary(students,saved,month,session,cls,working);
+  const day = (ls('monthlyAtt')||{})[`${session}_${cls}_${monthIdx}`]||{};
+  const first = Object.values(day)[0];
+  return first ? first.working : '';
 }
-
-function recalcRow(studentId){
-  const wEl = document.getElementById(`maW_${studentId}`);
-  const pEl = document.getElementById(`maP_${studentId}`);
-  if(!wEl||!pEl) return;
-  const w  = Math.max(0,parseInt(wEl.value)||0);
-  const p  = Math.max(0,Math.min(w,parseInt(pEl.value)||0));
-  pEl.max  = w;
-  const absent = w - p;
-  const pct    = w>0 ? Math.round(p/w*100) : 0;
-  const low    = pct<75;
-  document.getElementById(`maA_${studentId}`).textContent = absent;
-  document.getElementById(`maA_${studentId}`).style.color = absent ? '#b91c1c' : '#15803d';
-  document.getElementById(`maPct_${studentId}`).innerHTML = `<span class="badge ${low?'badge-danger':pct<85?'badge-warning':'badge-success'}">${pct}%</span>`;
-  document.getElementById(`maStatus_${studentId}`).innerHTML = `<span class="badge ${low?'badge-danger':'badge-success'}">${low?'⚠️ Low':'✓ OK'}</span>`;
-  const row = document.getElementById(`maRow_${studentId}`);
-  if(row) row.style.background = low?'#fff5f5':'';
-}
-
-function fillAllPresent(){
-  const wInput = document.getElementById('maWorkingDays');
-  const working = parseInt(wInput?.value||26);
-  document.querySelectorAll('[id^="maW_"]').forEach(el=>{
-    const sid = el.id.replace('maW_','');
-    el.value = working;
-    const pEl = document.getElementById(`maP_${sid}`);
-    if(pEl){ pEl.value = working; recalcRow(sid); }
-  });
-}
-
-function saveMonthlyAtt(){
-  const cls     = document.getElementById('maClass')?.value;
-  const month   = parseInt(document.getElementById('maMonth')?.value||0);
+// Sets Working Days for a whole month across every student in the class in
+// one go — students who already have a record keep their own Present Days
+// (capped to the new Working Days if it was lowered); students with no
+// record yet default to fully present, so a teacher only needs to click
+// individual students afterward to mark anyone who was actually absent.
+function setClassWorkingDaysForMonth(monthIdx, value){
+  const cls = window._maCurrentClass;
   const session = getActiveSession();
-  const students= (ls('students')||[]).filter(s=>s.session===session&&s.class===cls);
+  const working = Math.max(0, parseInt(value)||0);
+  const students = (ls('students')||[]).filter(s=>s.session===session&&s.class===cls);
   const monthlyAtt = ls('monthlyAtt')||{};
-  const key = `${session}_${cls}_${month}`;
+  const key = `${session}_${cls}_${monthIdx}`;
   if(!monthlyAtt[key]) monthlyAtt[key]={};
   students.forEach(s=>{
-    const wEl=document.getElementById(`maW_${s.id}`);
-    const pEl=document.getElementById(`maP_${s.id}`);
-    if(!wEl||!pEl) return;
-    const w = parseInt(wEl.value)||0;
-    const p = parseInt(pEl.value)||0;
-    monthlyAtt[key][s.id]={working:w,present:p,absent:w-p};
+    const existing = monthlyAtt[key][s.id];
+    const present = existing ? Math.min(existing.present, working) : working;
+    monthlyAtt[key][s.id] = {working, present, absent: working-present};
   });
+  ss('monthlyAtt', monthlyAtt);
+  toast(`✅ Working Days for ${MONTHS_FULL[monthIdx]} set to ${working} for the whole class`);
+  renderAttendanceGridRows();
+}
+// Inline, Excel/Marks-Register-style editing: every month cell is a small
+// number input for Present Days right in the table — no popup. Working
+// Days for the cell comes from that student's own saved record if they
+// have one, otherwise from the class-wide Working Days header input for
+// that month (or 26 if neither is set yet).
+function renderAttendanceGridRows(){
+  const cls = window._maCurrentClass;
+  const session = getActiveSession();
+  const students = (ls('students')||[]).filter(s=>s.session===session&&s.class===cls).sort((a,b)=>(a.roll||0)-(b.roll||0));
+  const monthlyAtt = ls('monthlyAtt')||{};
+  document.getElementById('yarTableBody').innerHTML = students.map(s=>{
+    const sum = getStudentMonthlyAttSummary(s.id, session);
+    const monthCells = MONTHS.map((_,m)=>{
+      const rec=(monthlyAtt[`${session}_${cls}_${m}`]||{})[s.id];
+      const pct = rec && rec.working>0 ? Math.round(rec.present/rec.working*100) : null;
+      const cellClass = pct===null ? 'na' : pct<75?'low':pct<85?'mid':'ok';
+      return `<td class="yar-month ${cellClass}">
+        <input type="number" class="yar-cell-in" min="0" max="31" value="${rec?rec.present:''}" placeholder="—"
+          data-sid="${s.id}" data-month="${m}" onchange="saveAttPresentCell(this)"
+          title="${rec?`${rec.present}/${rec.working} days present`:'Not entered yet'}">
+      </td>`;
+    }).join('');
+    const pct=sum.pct;
+    return `<tr>
+      <td class="yar-roll">${s.roll||'—'}</td><td class="yar-name">${esc(s.name)}</td>
+      <td class="yar-wd">${sum.totalWorking}</td>
+      ${monthCells}
+      <td class="yar-total">${sum.totalPresent}</td>
+      <td class="yar-pct"><span class="badge ${pct<75?'badge-danger':pct<85?'badge-warning':'badge-success'}">${pct}%</span></td>
+    </tr>`;
+  }).join('');
+}
+function saveAttPresentCell(el){
+  const sid = el.dataset.sid;
+  const monthIdx = parseInt(el.dataset.month);
+  const cls = window._maCurrentClass;
+  const session = getActiveSession();
+  const monthlyAtt = ls('monthlyAtt')||{};
+  const key = `${session}_${cls}_${monthIdx}`;
+  if(!monthlyAtt[key]) monthlyAtt[key]={};
+  const existing = monthlyAtt[key][sid];
+  const headerWd = parseInt(document.querySelector(`.wd-header-input[data-month="${monthIdx}"]`)?.value);
+  const working = existing ? existing.working : (headerWd||26);
+  let present = parseInt(el.value);
+  if(isNaN(present)) present = 0;
+  present = Math.max(0, Math.min(working, present));
+  monthlyAtt[key][sid] = {working, present, absent: working-present};
+  ss('monthlyAtt', monthlyAtt);
+  clearTimeout(window._attCellTimer);
+  window._attCellTimer = setTimeout(renderAttendanceGridRows, 500);
+}
+
+// ── Quick Fill a Month — bulk-set the whole class present for a chosen
+// month in one click (keeps the old "mark everyone present" convenience
+// without forcing month-by-month entry as the only option). ──
+function openQuickFillMonth(){
+  const cls = window._maCurrentClass || document.getElementById('maClass')?.value;
+  if(!cls){ toast('Select and load a class first','error'); return; }
+  const cm=currMonth();
+  openModal('Quick Fill a Month',`
+    <div class="text-sm text-muted" style="margin-bottom:10px">Marks every student in <strong>${esc(cls)}</strong> as fully present for the chosen month. You can still fix individual students afterward by clicking their cell.</div>
+    <div class="form-row">
+      <div class="form-group"><label>Month</label>
+        <select id="qfMonth" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px">
+          ${MONTHS_FULL.map((m,i)=>`<option value="${i}" ${i===cm?'selected':''}>${m}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Working Days</label>
+        <input type="number" id="qfWorking" value="26" min="1" max="31" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px">
+      </div>
+    </div>
+  `,[
+    {label:'Mark Whole Class Present',cls:'btn-success',onclick:'doQuickFillMonth()'},
+    {label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}
+  ]);
+}
+function doQuickFillMonth(){
+  const cls = window._maCurrentClass;
+  const session = getActiveSession();
+  const monthIdx = parseInt(document.getElementById('qfMonth').value);
+  const working = Math.max(1,parseInt(document.getElementById('qfWorking').value)||26);
+  const students = (ls('students')||[]).filter(s=>s.session===session&&s.class===cls);
+  const monthlyAtt = ls('monthlyAtt')||{};
+  const key = `${session}_${cls}_${monthIdx}`;
+  if(!monthlyAtt[key]) monthlyAtt[key]={};
+  students.forEach(s=>{ monthlyAtt[key][s.id]={working,present:working,absent:0}; });
   ss('monthlyAtt',monthlyAtt);
-  toast('Monthly attendance saved!');
-  renderMASummary(students,monthlyAtt[key],month,session,cls);
+  closeModal();
+  toast(`✅ ${MONTHS_FULL[monthIdx]} marked present for ${students.length} students`);
+  renderAttendanceGridRows();
 }
 
-function renderMASummary(students,saved,month,session,cls,defaultWorking=26){
-  const el=document.getElementById('maSummaryBanner');
-  if(!el) return;
-  let below75=0,below85=0,perfect=0;
-  students.forEach(s=>{
-    const rec=saved[s.id]||{working:defaultWorking,present:defaultWorking};
-    const pct=rec.working>0?Math.round(rec.present/rec.working*100):100;
-    if(pct<75)below75++;
-    else if(pct<85)below85++;
-    else perfect++;
-  });
-  el.innerHTML=`<div style="display:flex;gap:12px;flex-wrap:wrap">
-    <div style="flex:1;min-width:120px;padding:12px;background:#dcfce7;border-radius:10px;text-align:center">
-      <div style="font-size:22px;font-weight:900;color:#15803d">${perfect}</div>
-      <div style="font-size:11px;color:#15803d;font-weight:700">≥85% (Good)</div>
-    </div>
-    <div style="flex:1;min-width:120px;padding:12px;background:#fef9c3;border-radius:10px;text-align:center">
-      <div style="font-size:22px;font-weight:900;color:#a16207">${below85}</div>
-      <div style="font-size:11px;color:#a16207;font-weight:700">75–84% (Caution)</div>
-    </div>
-    <div style="flex:1;min-width:120px;padding:12px;background:#fee2e2;border-radius:10px;text-align:center">
-      <div style="font-size:22px;font-weight:900;color:#b91c1c">${below75}</div>
-      <div style="font-size:11px;color:#b91c1c;font-weight:700">⚠️ &lt;75% (Low)</div>
-    </div>
-    <div style="flex:1;min-width:120px;padding:12px;background:#f0f4ff;border-radius:10px;text-align:center">
-      <div style="font-size:22px;font-weight:900;color:var(--primary)">${students.length}</div>
-      <div style="font-size:11px;color:var(--text-muted);font-weight:700">Total Students</div>
-    </div>
-  </div>`;
-}
+// ── Yearly Attendance Register printout (landscape A4) — this is the print
+// counterpart to the editable grid above (loadAttendanceYearGrid); both read
+// from the same monthlyAtt store so print always matches what's on screen.
+function printYearlyAttendanceRegister(cls){
+  const session = getActiveSession();
+  cls = cls || document.getElementById('maClass')?.value;
+  const students = (ls('students')||[]).filter(s=>s.session===session&&s.class===cls).sort((a,b)=>(a.roll||0)-(b.roll||0));
+  if(!students.length){ toast('No students to print','error'); return; }
+  const monthlyAtt = ls('monthlyAtt')||{};
+  let grandWorking=0, grandPresent=0;
 
-function printMonthlyAtt(){
-  const cls   = document.getElementById('maClass')?.value||'';
-  const month = parseInt(document.getElementById('maMonth')?.value||0);
-  const session=getActiveSession();
-  const table = document.getElementById('maTable');
-  if(!table){ toast('Load students first','error'); return; }
-  const w=window.open('','_blank');
-  w.document.write(`<!DOCTYPE html><html><head><title>Monthly Attendance</title>
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-  <style>
-    body{font-family:'Nunito',sans-serif;padding:24px;color:#1a2740}
-    .hdr{text-align:center;border-bottom:3px solid #1a3a6b;padding-bottom:12px;margin-bottom:18px}
-    h1{font-family:'Playfair Display',serif;color:#1a3a6b;font-size:20px;margin:0}
-    h2{font-size:14px;color:#9a7b30;margin:4px 0}
-    table{width:100%;border-collapse:collapse;font-size:12px}
-    th{background:#1a3a6b;color:#fff;padding:8px 10px;text-align:center}
-    td{padding:7px 10px;border:1px solid #d0dbe8;text-align:center}
-    tr:nth-child(even) td{background:#f8faff}
-    .low{background:#fff0f0!important}
-    .sig{margin-top:28px;display:flex;justify-content:space-between;font-size:12px;border-top:1px solid #d0dbe8;padding-top:12px}
-    @page{size:A4;margin:18mm}
-  </style></head><body>
-  <div class="hdr">
-    <h1>Children's Paradise School</h1>
-    <div style="font-size:11px;color:#6b7a99">Uttar Radhanagar, Magrahat, South 24 Parganas, West Bengal</div>
-    <h2>MONTHLY ATTENDANCE REPORT — ${cls} | ${MONTHS_FULL[month]} ${session}</h2>
-  </div>
-  ${table.outerHTML}
-  <div class="sig">
-    <div>Class Teacher: _______________</div>
-    <div>Headmaster / Principal: _______________</div>
-    <div>Date: ${fmtDate(today())}</div>
-  </div>
-  </body></html>`);
-  w.document.close(); w.focus(); setTimeout(()=>{w.print();w.close();},400);
+  const rowsHTML = students.map(s=>{
+    const sum = getStudentMonthlyAttSummary(s.id, session);
+    grandWorking += sum.totalWorking; grandPresent += sum.totalPresent;
+    const monthCells = MONTHS.map((_,m)=>{
+      const rec=(monthlyAtt[`${session}_${cls}_${m}`]||{})[s.id];
+      if(!rec) return '<td class="na">—</td>';
+      const pct = rec.working>0 ? Math.round(rec.present/rec.working*100) : 0;
+      return `<td class="${pct<75?'low':pct<85?'mid':'ok'}">${pct}</td>`;
+    }).join('');
+    return `<tr>
+      <td>${s.roll||'—'}</td>
+      <td class="name">${esc(s.name)}</td>
+      <td>${sum.totalWorking}</td>
+      ${monthCells}
+      <td class="tot">${sum.totalPresent}</td>
+      <td class="${sum.pct<75?'low':sum.pct<85?'mid':'ok'}"><strong>${sum.pct}%</strong></td>
+    </tr>`;
+  }).join('');
+  const grandPct = grandWorking ? Math.round(grandPresent/grandWorking*100) : 0;
+
+  const body = `
+    ${schoolHeaderHTML(`Yearly Attendance Register — ${esc(cls)}, Session ${esc(session)}`)}
+    <div class="yar-meta">Class: <b>${esc(cls)}</b> &nbsp;|&nbsp; Session: <b>${esc(session)}</b> &nbsp;|&nbsp; Total Students: <b>${students.length}</b> &nbsp;|&nbsp; Print Date: <b>${esc(fmtDate(today()))}</b></div>
+    <table class="yar-table">
+      <colgroup>
+        <col style="width:4%"><col style="width:19%"><col style="width:7%">
+        ${MONTHS.map(()=>'<col style="width:5%">').join('')}
+        <col style="width:6%"><col style="width:6%">
+      </colgroup>
+      <thead><tr><th>Roll</th><th>Name</th><th>Working<br>Days</th>${MONTHS.map(m=>`<th class="sm">${m}</th>`).join('')}<th>Total<br>Present</th><th>Overall<br>%</th></tr></thead>
+      <tbody>${rowsHTML}</tbody>
+      <tfoot>
+        <tr class="grand">
+          <td colspan="3" style="text-align:right">CLASS TOTAL &nbsp;→</td>
+          <td colspan="12"></td>
+          <td class="tot">${grandPresent}</td>
+          <td>${grandPct}%</td>
+        </tr>
+      </tfoot>
+    </table>
+    <div class="yar-legend"><span class="ok">■</span> 85%+ Good &nbsp; <span class="mid">■</span> 75–84% Caution &nbsp; <span class="low">■</span> Below 75% Low &nbsp; <span class="na">—</span> Not entered yet</div>
+    <div class="signatures" style="margin-top:26px">
+      <div class="sig-box"><div class="sig-line"></div>Class Teacher</div>
+      <div class="sig-box"><div class="sig-line"></div>Principal</div>
+    </div>
+    <style>
+      @page{size:A4 landscape;margin:9mm}
+      .yar-meta{font-size:11px;margin:6px 0 10px;text-align:center;color:#334155}
+      table.yar-table{width:100%;border-collapse:collapse;font-size:8.6px;table-layout:fixed}
+      table.yar-table th,table.yar-table td{border:1px solid #b9c3d4;padding:3px 2px;text-align:center}
+      table.yar-table th{background:#1a3a6b;color:#fff;font-size:8px;text-transform:uppercase}
+      table.yar-table th.sm{font-size:7.3px}
+      table.yar-table td.name{text-align:left;padding-left:4px;font-weight:700;white-space:normal;word-break:break-word}
+      table.yar-table td.ok{color:#15803d;font-weight:800}
+      table.yar-table td.mid{color:#a16207;font-weight:800}
+      table.yar-table td.low{color:#b91c1c;font-weight:900;background:#fff5f5}
+      table.yar-table td.na{color:#c3cad6}
+      table.yar-table td.tot{font-weight:800;color:#1a3a6b}
+      table.yar-table tbody tr:nth-child(even){background:#f8faff}
+      table.yar-table tfoot tr.grand td{background:#1a3a6b;color:#fff;font-weight:900;font-size:10.5px;padding:7px 4px}
+      .yar-legend{font-size:9px;margin-top:8px;color:#475569}
+      .yar-legend .ok{color:#15803d}
+      .yar-legend .mid{color:#a16207}
+      .yar-legend .low{color:#b91c1c}
+      .yar-legend .na{color:#94a3b8}
+    </style>`;
+  printWindow('Yearly Attendance Register', body);
 }
 
 // Get monthly attendance summary for student profile
@@ -22863,7 +22955,7 @@ function afterRender(pageId){
     }
     // Auto-load monthly attendance
     if(pageId==='monthlyAttendance'){
-      setTimeout(()=>{ if(typeof loadMonthlyAttendance==='function') loadMonthlyAttendance(); }, 80);
+      setTimeout(()=>{ if(typeof loadAttendanceYearGrid==='function') loadAttendanceYearGrid(); }, 80);
     }
     // Generate due report if already filtered
     if(pageId==='dueReport'){
