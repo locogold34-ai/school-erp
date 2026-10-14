@@ -1785,11 +1785,32 @@ function getGovRecord(studentId){
   const all=getAllGovRecords();
   return all[studentId]||defaultGovRecord();
 }
-// Simplified government record — ONLY status, one optional government ID, and remarks.
+// The three government IDs a student can have — single source of truth for labels/keys.
+// NOTE: the Student State Code (formerly the "Banglar Shiksha ID") keeps its original storage key
+// `banglarShikshaId`, so every record already saved keeps working with no migration; only the
+// label changed. The Student PEN and APAAR ID are new optional fields on the same record.
+const GOV_ID_FIELDS=[
+  {key:'banglarShikshaId', label:'Student State Code', short:'State Code', icon:'🆔', color:'#1d4ed8', bg:'#dbeafe', hint:'Issued first, when the student is entered in the government portal'},
+  {key:'studentPenId',     label:'Student PEN',        short:'PEN',        icon:'🪪', color:'#7c3aed', bg:'#ede9fe', hint:'Permanent Education Number'},
+  {key:'apaarId',          label:'APAAR ID',           short:'APAAR',      icon:'🎓', color:'#0f766e', bg:'#ccfbf1', hint:'Automated Permanent Academic Account Registry ID'}
+];
+function govIdHas(rec,key){ return !!String((rec&&rec[key])||'').trim(); }
+function govIdMeta(key){ return GOV_ID_FIELDS.find(f=>f.key===key); }
+// Compact stacked cell (State Code / PEN / APAAR) for tables that only have room for one column
+function govIdsInline(rec){
+  return GOV_ID_FIELDS.map(f=>`<div style="white-space:nowrap"><span style="color:#94a3b8;font-size:9.5px;font-weight:800">${f.short}:</span> ${esc((rec&&rec[f.key])||'—')}</div>`).join('');
+}
+// Plain-text lines ("Student State Code: 123") for the IDs that have been recorded — used in WhatsApp messages
+function govIdsMessageText(rec){
+  return GOV_ID_FIELDS.filter(f=>govIdHas(rec,f.key)).map(f=>`${f.label}: ${rec[f.key]}`).join('\n');
+}
+// Simplified government record — status, the three optional government IDs, and remarks.
 function defaultGovRecord(){
   return {
     status:'FORM_NOT_SUBMITTED',
-    banglarShikshaId:'',
+    banglarShikshaId:'',   // Student State Code
+    studentPenId:'',       // Student PEN
+    apaarId:'',            // APAAR ID
     schoolName:'',
     remarks:'',
     // Age-verification fields (separate concern, see computeAgeVerification above)
@@ -1823,11 +1844,19 @@ function computeGovStats(students){
   const STATUSES=['ID_CREATED','FORM_SUBMITTED','EXISTING_ID_IN_GOVT_SCHOOL','FORM_NOT_SUBMITTED'];
   const stats={total:students.length,ID_CREATED:0,FORM_SUBMITTED:0,EXISTING_ID_IN_GOVT_SCHOOL:0,FORM_NOT_SUBMITTED:0,green:0,yellow:0,blue:0,red:0,
     totalBoys:0,totalGirls:0,totalOther:0,
-    genderByStatus:{ID_CREATED:{boys:0,girls:0,other:0},FORM_SUBMITTED:{boys:0,girls:0,other:0},EXISTING_ID_IN_GOVT_SCHOOL:{boys:0,girls:0,other:0},FORM_NOT_SUBMITTED:{boys:0,girls:0,other:0}}};
+    genderByStatus:{ID_CREATED:{boys:0,girls:0,other:0},FORM_SUBMITTED:{boys:0,girls:0,other:0},EXISTING_ID_IN_GOVT_SCHOOL:{boys:0,girls:0,other:0},FORM_NOT_SUBMITTED:{boys:0,girls:0,other:0}},
+    ids:{}};
+  GOV_ID_FIELDS.forEach(f=>{ stats.ids[f.key]={created:0,pending:0,boys:0,girls:0,other:0}; });
   students.forEach(s=>{
     const rec=all[s.id]||defaultGovRecord();
     if(stats[rec.status]!==undefined) stats[rec.status]++;
     stats[govBucket(rec)]++;
+    // Per-ID tracking: "created" = an ID value has been recorded for this student
+    const gKey=((s.gender||'').toLowerCase()==='male')?'boys':((s.gender||'').toLowerCase()==='female')?'girls':'other';
+    GOV_ID_FIELDS.forEach(f=>{
+      if(govIdHas(rec,f.key)){ stats.ids[f.key].created++; stats.ids[f.key][gKey]++; }
+      else stats.ids[f.key].pending++;
+    });
     const g=(s.gender||'').toLowerCase();
     const key = g==='male'?'boys' : g==='female'?'girls' : 'other';
     stats[key==='boys'?'totalBoys':key==='girls'?'totalGirls':'totalOther']++;
@@ -3584,6 +3613,34 @@ function renderGovDashboard(){
     </div>
   </div>
 
+  <div style="font-size:13px;font-weight:900;color:#0d1f3c;margin:4px 0 10px">Government IDs <span style="font-weight:600;color:#94a3b8;font-size:11px">— how many students have each ID recorded</span></div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;margin-bottom:20px">
+    ${GOV_ID_FIELDS.map(f=>{
+      const c=stats.ids[f.key];
+      const idPct=stats.total?Math.round(c.created/stats.total*100):0;
+      return `<div style="background:white;border-radius:14px;padding:14px 16px;border:1.5px solid #e8eef5;border-top:4px solid ${f.color}">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="width:34px;height:34px;border-radius:10px;background:${f.bg};display:flex;align-items:center;justify-content:center;font-size:17px">${f.icon}</div>
+          <div><div style="font-size:13px;font-weight:900;color:#0d1f3c">${f.label}</div><div style="font-size:10px;color:#94a3b8">${idPct}% of ${stats.total} students</div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div onclick="openGovIdList('${f.key}','created')" title="See students who have this ID" style="cursor:pointer;background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;padding:8px 10px">
+            <div style="font-size:10.5px;font-weight:800;color:#15803d">✅ Created</div>
+            <div style="font-size:22px;font-weight:900;color:#15803d;line-height:1.2">${c.created}</div>
+            <div style="font-size:10px;color:#6b7a99;font-weight:700">👦 ${c.boys} · 👧 ${c.girls}${c.other?` · ${c.other} other`:''}</div>
+          </div>
+          <div onclick="openGovIdList('${f.key}','pending')" title="See students still waiting for this ID" style="cursor:pointer;background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;padding:8px 10px">
+            <div style="font-size:10.5px;font-weight:800;color:#b91c1c">⏳ Pending</div>
+            <div style="font-size:22px;font-weight:900;color:#b91c1c;line-height:1.2">${c.pending}</div>
+            <div style="font-size:10px;color:#6b7a99;font-weight:700">not yet recorded</div>
+          </div>
+        </div>
+        <div style="height:7px;border-radius:6px;background:#f1f5f9;overflow:hidden;margin-top:10px"><div style="height:100%;width:${idPct}%;background:${f.color};border-radius:6px"></div></div>
+      </div>`;
+    }).join('')}
+  </div>
+
+  <div style="font-size:13px;font-weight:900;color:#0d1f3c;margin:4px 0 10px">Record Status</div>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
     ${cards.map(([status,icon,label,val,badge,sub])=>`
       <div onclick="openGovStatusList(${status?`'${status}'`:'null'})" style="background:white;border-radius:14px;padding:14px 16px;border:1.5px solid #e8eef5;display:flex;align-items:center;gap:8px;cursor:pointer;transition:box-shadow .15s" onmouseover="this.style.boxShadow='0 4px 14px rgba(0,0,0,.08)'" onmouseout="this.style.boxShadow='none'">
@@ -3605,6 +3662,8 @@ function renderGovDashboard(){
 // printable A4 report — session-wide across every class, not just one. ──
 function openGovStatusList(status){
   window._govListStatus = status;
+  window._govListIdKey = null;
+  window._govListIdState = null;
   window._govListGender = 'All';
   const session=getActiveSession();
   const title = status ? `${GOV_STATUS_META[status]?.icon||''} ${GOV_STATUS_META[status]?.label||status}` : '👨‍🎓 All Students';
@@ -3621,14 +3680,53 @@ function openGovStatusList(status){
   `, [{label:'Close',cls:'btn-outline',onclick:'closeModal()'}], 'modal-lg');
   loadGovStatusList();
 }
+// Opens the same list modal, filtered by one of the three government IDs:
+// state = 'created' (ID recorded), 'pending' (not recorded yet) or 'all'
+function openGovIdList(idKey,state){
+  const f=govIdMeta(idKey);
+  window._govListStatus = null;
+  window._govListIdKey = idKey;
+  window._govListIdState = state||'created';
+  window._govListGender = 'All';
+  openModal(`${f.icon} ${f.label}`, `
+    <div class="no-print" style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm btn-outline gov-idstate-btn" data-s="created" onclick="setGovListIdState('created')">✅ Created</button>
+        <button class="btn btn-sm btn-outline gov-idstate-btn" data-s="pending" onclick="setGovListIdState('pending')">⏳ Pending</button>
+        <button class="btn btn-sm btn-outline gov-idstate-btn" data-s="all" onclick="setGovListIdState('all')">All</button>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm btn-outline gov-gender-btn" data-g="All" onclick="setGovListGender('All')">All</button>
+        <button class="btn btn-sm btn-outline gov-gender-btn" data-g="Male" onclick="setGovListGender('Male')">👦 Boys</button>
+        <button class="btn btn-sm btn-outline gov-gender-btn" data-g="Female" onclick="setGovListGender('Female')">👧 Girls</button>
+      </div>
+      <button class="btn btn-sm btn-primary" style="margin-left:auto" onclick="printGovStatusList()"><i class="fas fa-print"></i> Print A4</button>
+    </div>
+    <div id="govStatusListBody"></div>
+  `, [{label:'Close',cls:'btn-outline',onclick:'closeModal()'}], 'modal-lg');
+  loadGovStatusList();
+}
+function setGovListIdState(s){ window._govListIdState=s; loadGovStatusList(); }
+// Plain-text title for the current list (used by the modal count line and the printout)
+function govListTitle(){
+  const status=window._govListStatus, idKey=window._govListIdKey, st=window._govListIdState;
+  if(idKey){
+    const f=govIdMeta(idKey);
+    return `${f.label} — ${st==='created'?'Created':st==='pending'?'Pending (not yet recorded)':'All Students'}`;
+  }
+  return status ? (GOV_STATUS_META[status]?.label||status) : 'All Students';
+}
 function setGovListGender(g){ window._govListGender=g; loadGovStatusList(); }
 function getGovStatusListStudents(){
   const session=getActiveSession();
   const status=window._govListStatus;
+  const idKey=window._govListIdKey, idState=window._govListIdState;
   const gender=window._govListGender||'All';
   const all=getAllGovRecords();
   let students=(ls('students')||[]).filter(s=>s.session===session);
   if(status) students=students.filter(s=>(all[s.id]||defaultGovRecord()).status===status);
+  if(idKey && idState==='created') students=students.filter(s=>govIdHas(all[s.id]||defaultGovRecord(),idKey));
+  if(idKey && idState==='pending') students=students.filter(s=>!govIdHas(all[s.id]||defaultGovRecord(),idKey));
   if(gender!=='All') students=students.filter(s=>(s.gender||'')===gender);
   return students.sort((a,b)=>a.class.localeCompare(b.class)||(a.roll||0)-(b.roll||0));
 }
@@ -3638,17 +3736,23 @@ function loadGovStatusList(){
   const gender=window._govListGender||'All';
   document.querySelectorAll('.gov-gender-btn').forEach(b=>b.classList.toggle('btn-primary',b.dataset.g===gender));
   document.querySelectorAll('.gov-gender-btn').forEach(b=>b.classList.toggle('btn-outline',b.dataset.g!==gender));
+  const idState=window._govListIdState;
+  document.querySelectorAll('.gov-idstate-btn').forEach(b=>{
+    b.classList.toggle('btn-primary',b.dataset.s===idState);
+    b.classList.toggle('btn-outline',b.dataset.s!==idState);
+  });
   const all=getAllGovRecords();
   const students=getGovStatusListStudents();
+  const th='padding:6px 8px;text-align:left';
   body.innerHTML = students.length ? `
-    <div class="text-sm text-muted" style="margin-bottom:8px">${students.length} student${students.length===1?'':'s'}</div>
-    <table style="width:100%;border-collapse:collapse;font-size:12.5px">
-      <thead><tr style="background:#f0f4ff"><th style="padding:6px 8px;text-align:left">Class</th><th style="padding:6px 8px;text-align:left">Roll</th><th style="padding:6px 8px;text-align:left">Name</th><th style="padding:6px 8px;text-align:left">Gender</th><th style="padding:6px 8px;text-align:left">Govt. ID</th><th style="padding:6px 8px;text-align:left">Phone</th></tr></thead>
+    <div class="text-sm text-muted" style="margin-bottom:8px"><b>${esc(govListTitle())}</b> · ${students.length} student${students.length===1?'':'s'}</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px">
+      <thead><tr style="background:#f0f4ff"><th style="${th}">Class</th><th style="${th}">Roll</th><th style="${th}">Name</th><th style="${th}">Gender</th>${GOV_ID_FIELDS.map(f=>`<th style="${th}">${f.label}</th>`).join('')}<th style="${th}">Phone</th></tr></thead>
       <tbody>${students.map(s=>{
         const rec=all[s.id]||defaultGovRecord();
-        return `<tr style="border-bottom:1px solid #f0f4ff"><td style="padding:6px 8px">${esc(s.class)}</td><td style="padding:6px 8px">${s.roll||'—'}</td><td style="padding:6px 8px;font-weight:700">${esc(s.name)}</td><td style="padding:6px 8px">${esc(s.gender||'—')}</td><td style="padding:6px 8px">${esc(rec.banglarShikshaId||'—')}</td><td style="padding:6px 8px">${esc(s.phone||'—')}</td></tr>`;
+        return `<tr style="border-bottom:1px solid #f0f4ff"><td style="padding:6px 8px">${esc(s.class)}</td><td style="padding:6px 8px">${s.roll||'—'}</td><td style="padding:6px 8px;font-weight:700">${esc(s.name)}</td><td style="padding:6px 8px">${esc(s.gender||'—')}</td>${GOV_ID_FIELDS.map(f=>`<td style="padding:6px 8px;${govIdHas(rec,f.key)?'':'color:#cbd5e1'}">${esc(rec[f.key]||'—')}</td>`).join('')}<td style="padding:6px 8px">${esc(s.phone||'—')}</td></tr>`;
       }).join('')}</tbody>
-    </table>` : emptyState('📭','No students in this category',(gender!=='All')?`Try switching the filter back to "All"`:'');
+    </table></div>` : emptyState('📭','No students in this category',(gender!=='All')?`Try switching the filter back to "All"`:'');
 }
 function printGovStatusList(){
   const session=getActiveSession();
@@ -3656,15 +3760,15 @@ function printGovStatusList(){
   const gender=window._govListGender||'All';
   const students=getGovStatusListStudents();
   const all=getAllGovRecords();
-  const title = status ? `${GOV_STATUS_META[status]?.label||status}` : 'All Students';
+  const title = govListTitle();
   const body=`
     ${schoolHeaderHTML(`Government Record — ${esc(title)}`)}
     <div style="font-size:11px;margin:8px 0 14px">Session: ${esc(session)} &nbsp;|&nbsp; Category: ${esc(title)}${gender!=='All'?` (${gender==='Male'?'Boys':'Girls'})`:''} &nbsp;|&nbsp; Date: ${esc(fmtDate(today()))} &nbsp;|&nbsp; Total: ${students.length}</div>
     <table style="width:100%;border-collapse:collapse;font-size:11px">
-      <thead><tr><th>Sl</th><th>Class</th><th>Roll</th><th>Student Name</th><th>Gender</th><th>Government ID</th><th>Phone</th></tr></thead>
+      <thead><tr><th>Sl</th><th>Class</th><th>Roll</th><th>Student Name</th><th>Gender</th>${GOV_ID_FIELDS.map(f=>`<th>${f.label}</th>`).join('')}<th>Phone</th></tr></thead>
       <tbody>${students.map((s,i)=>{
         const rec=all[s.id]||defaultGovRecord();
-        return `<tr><td>${i+1}</td><td>${esc(s.class)}</td><td>${s.roll||'—'}</td><td>${esc(s.name)}</td><td>${esc(s.gender||'—')}</td><td>${esc(rec.banglarShikshaId||'—')}</td><td>${esc(s.phone||'—')}</td></tr>`;
+        return `<tr><td>${i+1}</td><td>${esc(s.class)}</td><td>${s.roll||'—'}</td><td>${esc(s.name)}</td><td>${esc(s.gender||'—')}</td>${GOV_ID_FIELDS.map(f=>`<td>${esc(rec[f.key]||'—')}</td>`).join('')}<td>${esc(s.phone||'—')}</td></tr>`;
       }).join('')}</tbody>
     </table>
     <div class="signatures" style="margin-top:30px">
@@ -3736,10 +3840,10 @@ function renderGovClassRecords(){
 
   <div style="background:white;border-radius:14px;border:1.5px solid #e8eef5;overflow-x:auto">
     ${!visibleRows.length?emptyState('📭','No students in this category',filter?'Try clearing the filter above':'No students found'):`
-    <table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:980px">
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:1180px">
       <thead><tr style="background:#1a3a6b;text-align:left;color:white">
         <th style="padding:9px 10px">Roll</th><th style="padding:9px 10px">Student Name</th><th style="padding:9px 10px">Date of Birth</th><th style="padding:9px 10px">Phone</th>
-        <th style="padding:9px 10px">Government ID</th><th style="padding:9px 10px">School Name</th>
+        ${GOV_ID_FIELDS.map(f=>`<th style="padding:9px 10px;white-space:nowrap">${f.label}</th>`).join('')}<th style="padding:9px 10px">School Name</th>
         <th style="padding:9px 10px">Status</th><th style="padding:9px 10px">Remarks</th><th style="padding:9px 10px">Action</th>
       </tr></thead>
       <tbody>
@@ -3751,7 +3855,7 @@ function renderGovClassRecords(){
           <td style="padding:8px 10px;font-weight:700;color:var(--primary);white-space:nowrap">${esc(s.name)}</td>
           <td style="padding:8px 10px;white-space:nowrap;${ageMismatch?'color:#b91c1c;font-weight:800':''}">${s.dob?fmtDate(s.dob):'—'}${ageMismatch?` <span title="Expected birth year ${ageRule.birthYear}">⚠️</span>`:''}</td>
           <td style="padding:8px 10px;color:#6b7a99">${esc(s.phone||'—')}</td>
-          <td style="padding:8px 10px">${esc(rec.banglarShikshaId||'—')}</td>
+          ${GOV_ID_FIELDS.map(f=>`<td style="padding:8px 10px;white-space:nowrap${govIdHas(rec,f.key)?'':';color:#cbd5e1'}">${esc(rec[f.key]||'—')}</td>`).join('')}
           <td style="padding:8px 10px;color:#6b7a99">${esc(rec.schoolName||'—')}</td>
           <td style="padding:8px 10px">${govStatusBadge(rec.status)}</td>
           <td style="padding:8px 10px;color:#6b7a99;max-width:200px;white-space:normal">${esc(rec.remarks||'—')}</td>
@@ -3770,10 +3874,10 @@ function exportGovClassCSV(){
   const cls=window._govSelClass||'';
   const students=(ls('students')||[]).filter(s=>s.session===session&&s.class===cls).sort((a,b)=>(a.roll||0)-(b.roll||0));
   const all=getAllGovRecords();
-  const rows=[['Roll','Student Name','Date of Birth','Phone','Government ID','School Name','Status','Remarks']];
+  const rows=[['Roll','Student Name','Date of Birth','Phone','Student State Code','Student PEN','APAAR ID','School Name','Status','Remarks']];
   students.forEach(s=>{
     const rec=all[s.id]||defaultGovRecord();
-    rows.push([s.roll,s.name,s.dob?fmtDate(s.dob):'',s.phone,rec.banglarShikshaId||'',rec.schoolName||'',(GOV_STATUS_META[rec.status]||{}).label||rec.status,rec.remarks]);
+    rows.push([s.roll,s.name,s.dob?fmtDate(s.dob):'',s.phone,rec.banglarShikshaId||'',rec.studentPenId||'',rec.apaarId||'',rec.schoolName||'',(GOV_STATUS_META[rec.status]||{}).label||rec.status,rec.remarks]);
   });
   const csv=rows.map(r=>r.map(c=>{const v=String(c===null||c===undefined?'':c);return/[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\r\n');
   const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
@@ -3828,11 +3932,11 @@ function printClassGovReport(){
     <div>🔵 <b>${buckets.blue.length}</b><br>Existing ID in Govt. School</div>
     <div>🔴 <b>${buckets.red.length}</b><br>Form Not Submitted</div>
   </div>`}
-  <table><thead><tr><th>Roll</th><th>Student Name</th><th>Date of Birth</th><th>Phone</th><th>Government ID</th><th>School Name</th><th>Status</th><th>Remarks</th></tr></thead>
+  <table><thead><tr><th>Roll</th><th>Student Name</th><th>Date of Birth</th><th>Phone</th>${GOV_ID_FIELDS.map(f=>`<th>${f.label}</th>`).join('')}<th>School Name</th><th>Status</th><th>Remarks</th></tr></thead>
   <tbody>${printRows.map(({s,rec})=>{
     const dobYear = s.dob ? new Date(s.dob).getFullYear() : null;
     const ageMismatch = ageRule && dobYear && dobYear !== ageRule.birthYear;
-    return `<tr><td>${s.roll||'—'}</td><td>${esc(s.name)}</td><td${ageMismatch?' style="color:#b91c1c;font-weight:800"':''}>${s.dob?esc(fmtDate(s.dob)):'—'}${ageMismatch?' ⚠️':''}</td><td>${esc(s.phone||'—')}</td><td>${esc(rec.banglarShikshaId||'—')}</td><td>${esc(rec.schoolName||'—')}</td><td>${esc((GOV_STATUS_META[rec.status]||{}).label||rec.status)}</td><td>${esc(rec.remarks||'—')}</td></tr>`;
+    return `<tr><td>${s.roll||'—'}</td><td>${esc(s.name)}</td><td${ageMismatch?' style="color:#b91c1c;font-weight:800"':''}>${s.dob?esc(fmtDate(s.dob)):'—'}${ageMismatch?' ⚠️':''}</td><td>${esc(s.phone||'—')}</td>${GOV_ID_FIELDS.map(f=>`<td>${esc(rec[f.key]||'—')}</td>`).join('')}<td>${esc(rec.schoolName||'—')}</td><td>${esc((GOV_STATUS_META[rec.status]||{}).label||rec.status)}</td><td>${esc(rec.remarks||'—')}</td></tr>`;
   }).join('')}</tbody></table>
   ${ageRule?`<div style="font-size:10px;color:#94a3b8;margin-top:6px">⚠️ marks a student whose Date of Birth does not match the expected birth year for this class.</div>`:''}
   <div class="footer">
@@ -3860,7 +3964,7 @@ function sendParentGovtSchoolWarning(studentId){
   const rec=getGovRecord(studentId);
   const settings=ls('settings')||{};
   const contact=settings.govContactNumber||'';
-  const msg=`Dear Parent/Guardian,\n\nOur school records show that your child ${s.name} already has a Banglar Shiksha ID/entry under another school.\n\nClass: ${s.class}\nRoll No.: ${s.roll}\n${rec.banglarShikshaId?`\nBanglar Shiksha ID:\n${rec.banglarShikshaId}\n`:''}\nPlease collect the Transfer Certificate (TC) from the previous school and submit it to the Children's Paradise School office as soon as possible.\n\nThis is required so that the student's government record can be processed correctly under our school.\n\nThank you.\n\nChildren's Paradise School\nUttar Radhanagar, Magrahat, South 24 Parganas, West Bengal${contact?'\n'+contact:''}`;
+  const msg=`Dear Parent/Guardian,\n\nOur school records show that your child ${s.name} already has a Student State Code/entry under another school.\n\nClass: ${s.class}\nRoll No.: ${s.roll}\n${rec.banglarShikshaId?`\nStudent State Code:\n${rec.banglarShikshaId}\n`:''}\nPlease collect the Transfer Certificate (TC) from the previous school and submit it to the Children's Paradise School office as soon as possible.\n\nThis is required so that the student's government record can be processed correctly under our school.\n\nThank you.\n\nChildren's Paradise School\nUttar Radhanagar, Magrahat, South 24 Parganas, West Bengal${contact?'\n'+contact:''}`;
   const phone=String(s.phone).replace(/\D/g,'');
   window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`,'_blank');
 }
@@ -3868,7 +3972,7 @@ function sendParentIDPendingUpdate(studentId){
   const students=ls('students')||[];
   const s=students.find(x=>x.id===studentId);
   if(!s||!s.phone){ toast('No phone number on file for this student','error'); return; }
-  const msg=`Dear Parent/Guardian,\n\nThe DCF form for ${s.name} (Class ${s.class}, Roll ${s.roll}) has been submitted to the school office and the government record process is currently in progress.\n\nWe will update you once the Banglar Shiksha ID is received.\n\nThank you.\n\nChildren's Paradise School`;
+  const msg=`Dear Parent/Guardian,\n\nThe DCF form for ${s.name} (Class ${s.class}, Roll ${s.roll}) has been submitted to the school office and the government record process is currently in progress.\n\nWe will update you once the Student State Code is received.\n\nThank you.\n\nChildren's Paradise School`;
   const phone=String(s.phone).replace(/\D/g,'');
   window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`,'_blank');
 }
@@ -3877,7 +3981,7 @@ function sendParentRecordConfirmation(studentId){
   const s=students.find(x=>x.id===studentId);
   if(!s||!s.phone){ toast('No phone number on file for this student','error'); return; }
   const rec=getGovRecord(studentId);
-  const msg=`Dear Parent/Guardian,\n\nWe are pleased to confirm that the government record ID for ${s.name} (Class ${s.class}, Roll ${s.roll}) has been created.\n${rec.banglarShikshaId?`\nBanglar Shiksha ID: ${rec.banglarShikshaId}\n`:''}\nThank you.\n\nChildren's Paradise School`;
+  const msg=`Dear Parent/Guardian,\n\nWe are pleased to confirm that the government record ID for ${s.name} (Class ${s.class}, Roll ${s.roll}) has been created.\n${govIdsMessageText(rec)?`\n${govIdsMessageText(rec)}\n`:''}\nThank you.\n\nChildren's Paradise School`;
   const phone=String(s.phone).replace(/\D/g,'');
   window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`,'_blank');
 }
@@ -3999,7 +4103,7 @@ function renderGovAgeVerification(){
       <thead><tr style="background:#1a3a6b;text-align:left;color:white">
         <th style="padding:8px 9px">Roll</th><th style="padding:8px 9px">Student</th><th style="padding:8px 9px">Phone</th>
         <th style="padding:8px 9px">DOB</th><th style="padding:8px 9px">Age (on 1 Jan)</th><th style="padding:8px 9px">School Class</th>
-        <th style="padding:8px 9px">Govt. Age Class</th><th style="padding:8px 9px">Government ID</th>
+        <th style="padding:8px 9px">Govt. Age Class</th><th style="padding:8px 9px">Student State Code</th>
         <th style="padding:8px 9px">Status</th><th style="padding:8px 9px">Remarks</th><th style="padding:8px 9px">Action</th>
       </tr></thead>
       <tbody>
@@ -4123,7 +4227,7 @@ function printGovAgeVerification(){
   <style>body{font-family:'Nunito',sans-serif;padding:24px;color:#1a2740}.header{text-align:center;border-bottom:3px solid #1a3a6b;padding-bottom:14px;margin-bottom:16px}h1{font-size:20px;color:#1a3a6b;margin:0}h2{font-size:13px;color:#c9a84c;margin:4px 0 0}table{width:100%;border-collapse:collapse;font-size:10px}th{background:#1a3a6b;color:white;padding:6px;text-align:left}td{padding:6px;border:1px solid #d0dbe8}.footer{margin-top:30px;display:flex;justify-content:space-between;font-size:11px}@page{size:A4 landscape;margin:12mm}</style>
   </head><body>
   <div class="header"><h1>Children's Paradise School</h1><div style="font-size:11px;color:#6b7a99">Uttar Radhanagar, Magrahat, South 24 Parganas, West Bengal</div><h2>AGE & GOVERNMENT CLASS VERIFICATION — ${cls?esc(cls):'All Classes'} (Session ${esc(session)})${filterLabel?` — ${esc(filterLabel)} (${printRows.length} students)`:''}</h2></div>
-  <table><thead><tr><th>Roll</th><th>Name</th><th>DOB</th><th>Age</th><th>School Class</th><th>Govt Age Class</th><th>Government ID</th><th>Status</th><th>Remarks</th></tr></thead>
+  <table><thead><tr><th>Roll</th><th>Name</th><th>DOB</th><th>Age</th><th>School Class</th><th>Govt Age Class</th><th>Student State Code</th><th>Status</th><th>Remarks</th></tr></thead>
   <tbody>${printRows.map(({s,rec,v})=>`<tr><td>${s.roll||'—'}</td><td>${esc(s.name)}</td><td>${fmtDate(s.dob)}</td><td>${v.age===null?'—':v.age}</td><td>${esc(s.class)}</td><td>${esc(v.ageAppropriateClass||'—')}</td><td>${esc(rec.banglarShikshaId||'—')}</td><td>${v.applicable?(v.mismatch?'AGE/CLASS DIFFERENCE':'MATCH'):'N/A'}</td><td>${esc(rec.ageDifferenceExplanation||'—')}</td></tr>`).join('')}</tbody></table>
   <div class="footer"><div>Office Signature: _______________</div><div>Principal Signature: _______________</div></div>
   </body></html>`);
@@ -4136,7 +4240,7 @@ function exportGovAgeVerificationCSV(){
   const cls=window._govAgeClass||'';
   const students=(ls('students')||[]).filter(s=>s.session===session&&(!cls||s.class===cls)).sort((a,b)=>(a.class||'').localeCompare(b.class||'')||(a.roll||0)-(b.roll||0));
   const all=getAllGovRecords();
-  const rows=[['Roll','Student Name','DOB','Age (1 Jan)','School Class','Govt. Age Class','Govt. Portal Class','Government ID','Status','Reason','Explanation']];
+  const rows=[['Roll','Student Name','DOB','Age (1 Jan)','School Class','Govt. Age Class','Govt. Portal Class','Student State Code','Status','Reason','Explanation']];
   students.forEach(s=>{
     const rec=all[s.id]||defaultGovRecord();
     const v=computeAgeVerification(s,sessionYear);
@@ -4221,7 +4325,12 @@ function openGovEditor(studentId){
         <label>School Name${isLocked?' <span style="font-weight:400;color:#94a3b8">(this school)</span>':''}</label>
         <input id="govSchoolName" value="${esc(schoolNameVal)}" ${isLocked?'readonly':''} placeholder="${rec.status==='EXISTING_ID_IN_GOVT_SCHOOL'?'Name of the government school':''}" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border);${isLocked?'background:#f1f5f9;color:#64748b':''}">
       </div>
-      <div class="form-group" style="grid-column:1/-1"><label>Government ID (Banglar Shiksha) — optional</label><input id="govBanglar" value="${esc(rec.banglarShikshaId)}" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)"></div>
+      <div style="grid-column:1/-1;background:#f8faff;border:1.5px solid #e1e8f5;border-radius:10px;padding:10px 12px">
+        <div style="font-size:11px;font-weight:900;color:#1a3a6b;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Government IDs <span style="font-weight:600;color:#94a3b8;text-transform:none">— all optional, fill in as each is issued</span></div>
+        <div style="display:grid;grid-template-columns:1fr;gap:8px">
+          ${GOV_ID_FIELDS.map((f,i)=>`<div class="form-group" style="margin:0"><label style="display:flex;align-items:center;gap:6px">${f.icon} ${i+1}. ${f.label} <span style="font-weight:500;color:#94a3b8;font-size:10.5px">${f.hint}</span></label><input id="govId_${f.key}" value="${esc(rec[f.key]||'')}" placeholder="${f.label}" autocomplete="off" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)"></div>`).join('')}
+        </div>
+      </div>
       <div class="form-group" style="grid-column:1/-1"><label>Remarks</label><textarea id="govRemarks" rows="2" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--border)">${esc(rec.remarks)}</textarea></div>
     </div>
     <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
@@ -4256,10 +4365,19 @@ function govStatusChanged(){
 function submitGovEditor(studentId){
   const patch={
     status:val('govStatus'),
-    banglarShikshaId:val('govBanglar'),
     schoolName:val('govSchoolName'),
     remarks:val('govRemarks')
   };
+  GOV_ID_FIELDS.forEach(f=>{ patch[f.key]=val('govId_'+f.key).trim(); });
+  // An ID belongs to exactly one student — warn before saving a value another student (this session) already has
+  const allRecs=getAllGovRecords();
+  const sessStudents=(ls('students')||[]).filter(x=>x.session===getActiveSession()&&x.id!==studentId);
+  for(const f of GOV_ID_FIELDS){
+    const v=patch[f.key];
+    if(!v) continue;
+    const other=sessStudents.find(x=>String((allRecs[x.id]||{})[f.key]||'').trim().toLowerCase()===v.toLowerCase());
+    if(other && !confirm(`This ${f.label} (${v}) is already saved for ${other.name} (${other.class}).\n\nEach student should have a different ${f.label}. Save anyway?`)) return;
+  }
   saveGovRecord(studentId,patch);
   toast('Government record updated');
   closeModal();
@@ -16046,7 +16164,7 @@ function openStudentProfile(id){
       ${currentUser.role!=='viewer'?`<button class="btn btn-sm btn-primary" onclick="closeModal();openGovEditor('${id}')"><i class="fas fa-edit"></i> Edit Government Record</button>`:''}
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      ${[['School Student ID',s.studentId],['Government ID (Banglar Shiksha)',rec.banglarShikshaId||'—']].map(([l,v])=>`<div style="background:#f8faff;padding:9px 12px;border-radius:8px;border:1px solid var(--border)"><div style="font-size:10px;color:var(--text-muted);font-weight:800;text-transform:uppercase">${l}</div><div style="font-size:13px;font-weight:700;color:var(--primary-dark);margin-top:2px">${esc(String(v))}</div></div>`).join('')}
+      ${[['School Student ID',s.studentId],...GOV_ID_FIELDS.map(f=>[f.label,rec[f.key]||'—'])].map(([l,v])=>`<div style="background:#f8faff;padding:9px 12px;border-radius:8px;border:1px solid var(--border)"><div style="font-size:10px;color:var(--text-muted);font-weight:800;text-transform:uppercase">${l}</div><div style="font-size:13px;font-weight:700;color:var(--primary-dark);margin-top:2px">${esc(String(v))}</div></div>`).join('')}
     </div>
     ${rec.remarks?`<div style="background:#f8faff;padding:9px 12px;border-radius:8px;border:1px solid var(--border);margin-top:8px"><div style="font-size:10px;color:var(--text-muted);font-weight:800;text-transform:uppercase">Remarks</div><div style="font-size:13px;font-weight:700;color:var(--primary-dark);margin-top:2px">${esc(rec.remarks)}</div></div>`:''}
     `;})()}
@@ -18407,7 +18525,7 @@ function startNewTC(studentId){
     lastSession: s.session||'', presentClass: s.class||'', presentSection: s.section||'', roll: s.roll||'', medium: s.medium||'',
     dateOfLeaving: today(), reasonForLeaving:'', reasonOther:'', lastExamPassed:'', result:'', totalAttendance:'', conduct:'Good',
     feesPaid: clearance.totalPaid, feeStatus: clearance.status, feeClearanceVerified:false,
-    schoolLeavingStatus:'', remarks:'', banglarShikshaId: govRec.banglarShikshaId||'',
+    schoolLeavingStatus:'', remarks:'', banglarShikshaId: govRec.banglarShikshaId||'', studentPenId: govRec.studentPenId||'', apaarId: govRec.apaarId||'',
     tcRequired:'Yes', destinationSchool:'', destinationAddress:'', destinationUdise:'',
     requestDate: today(), requestedBy: currentUser.name,
     issueDate:'', issuedBy:'', cancelledDate:'', cancelledBy:'', cancelReason:'',
@@ -18452,7 +18570,9 @@ const TC_FIELD_SCHEMA = [
   {section:'F', key:'destinationSchool', label:'Destination School', type:'text'},
   {section:'F', key:'destinationAddress', label:'Destination School Address', type:'textarea'},
   {section:'F', key:'destinationUdise', label:'Destination School UDISE Code (optional)', type:'text'},
-  {section:'F', key:'banglarShikshaId', label:'Government / Banglar Shiksha ID', type:'text'}
+  {section:'F', key:'banglarShikshaId', label:'Student State Code', type:'text'},
+  {section:'F', key:'studentPenId', label:'Student PEN', type:'text'},
+  {section:'F', key:'apaarId', label:'APAAR ID', type:'text'}
 ];
 function tcFieldId(key){ return 'tcf'+key.charAt(0).toUpperCase()+key.slice(1); }
 function renderTCField(f, val, locked){
@@ -18642,7 +18762,9 @@ function tcCertificateHTML(tc){
     ['Total Attendance / Working Days', tc.totalAttendance],
     ['Conduct / Character', tc.conduct],
     ['School Leaving Status', tc.schoolLeavingStatus],
-    ['Government / Banglar Shiksha ID', tc.banglarShikshaId],
+    ['Student State Code', tc.banglarShikshaId],
+    ['Student PEN', tc.studentPenId],
+    ['APAAR ID', tc.apaarId],
     ['Remarks', tc.remarks]
   ].filter(([,v])=>v);
   const logo = ls('schoolLogo') || SCHOOL.logo || '';
