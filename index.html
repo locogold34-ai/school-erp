@@ -5293,14 +5293,13 @@ function computeStudentFeeTotals(s){
     else if(amt>0) examDueAmt+=amt;
   });
 
-  // Books (admission-time books record: fees[id].books for this session)
-  const bk = (sf.books && String(sf.books.session)===String(s.session)) ? sf.books : null;
+  // Books are part of the combined admission fee (admissionTotal = admission + books); info only here.
+  const bk = (sf.books && sf.books.combined && String(sf.books.session)===String(s.session)) ? sf.books : null;
   const booksTotal = bk ? (parseFloat(bk.total)||0) : 0;
-  const booksPaid  = bk ? Math.min(booksTotal, parseFloat(bk.paid)||0) : 0;
-  const booksDue   = Math.max(0, booksTotal-booksPaid);
+  const booksPaid = 0, booksDue = 0;
 
-  const totalPaid = admPaid+monthlyPaidAmt+examPaidAmt+booksPaid;
-  const totalDue  = admDue+monthlyDueAmt+examDueAmt+booksDue;
+  const totalPaid = admPaid+monthlyPaidAmt+examPaidAmt;
+  const totalDue  = admDue+monthlyDueAmt+examDueAmt;
 
   return { admTotal, admPaid, admDue, monthly, monthPaidCount, monthDueCount,
     monthlyPaidAmt, monthlyDueAmt, overdueAmt, examPaidAmt, examDueAmt,
@@ -6758,6 +6757,7 @@ function renderFeeRegister(){
 }
 
 function loadFeeRegister(){
+  try{feesBooksMigrate();}catch(e){}
   const session = document.getElementById('frSession')?.value || getActiveSession();
   const cls     = document.getElementById('frClass')?.value || getAllClasses()[0];
   const area    = document.getElementById('feeRegisterArea');
@@ -6865,7 +6865,7 @@ function loadFeeRegister(){
     // ── ADMISSION CELL (editable) ───────────────────────────────────
     const admCell = `
       <td style="padding:3px 5px;min-width:95px">
-        <div style="font-size:9px;color:#64748b;text-align:center;margin-bottom:2px;font-weight:700">Total / Paid</div>
+        <div style="font-size:9px;color:#64748b;text-align:center;margin-bottom:2px;font-weight:700">Total / Paid${t.booksTotal>0?`<br><span style="color:#7c3aed">incl. books ₹${t.booksTotal.toLocaleString('en-IN')}</span>`:''}</div>
         <div style="display:flex;flex-direction:column;gap:2px;align-items:center">
           <input type="number" value="${admTotal}"
             onchange="frUpdateAdmTotal('${s.id}',this.value)" onclick="event.stopPropagation()"
@@ -6882,16 +6882,10 @@ function loadFeeRegister(){
         </div>
       </td>`;
 
-    const booksCell = t.booksTotal>0
-      ? `<td style="padding:3px 6px;text-align:center;cursor:pointer;min-width:90px" onclick="event.stopPropagation();openNewAdmCharges('${s.id}')" title="Open Admission & Books">
-           <div style="font-size:11px;font-weight:800;color:#1a3a6b">₹${t.booksPaid.toLocaleString('en-IN')} / ₹${t.booksTotal.toLocaleString('en-IN')}</div>
-           <div style="font-size:9px;font-weight:800;color:${t.booksDue>0?'#b91c1c':'#15803d'}">${t.booksDue>0?`Due ₹${t.booksDue.toLocaleString('en-IN')} 📚`:'✓ Paid 📚'}</div></td>`
-      : `<td style="padding:3px 6px;text-align:center;color:#cbd5e1">—</td>`;
     rows += `<tr id="frRow_${s.id}" style="border-bottom:1px solid #f0f4ff">
       <td style="padding:8px 10px;font-weight:800;color:#1a3a6b;text-align:center">${s.roll}</td>
       <td style="padding:8px 10px;font-weight:700;color:#0d1f3c;white-space:nowrap;min-width:130px">${esc(s.name)}</td>
       ${admCell}
-      ${booksCell}
       ${monthCells}
       ${examCells}
       <td style="padding:8px 10px;text-align:right;font-weight:800;color:#15803d;white-space:nowrap">
@@ -6915,9 +6909,6 @@ function loadFeeRegister(){
           <th style="padding:10px 8px;color:#fff;text-align:center;min-width:95px">
             Admission<br><span style="font-size:9px;opacity:.8;font-weight:500">Total / Paid</span>
           </th>
-          <th style="padding:10px 8px;color:#fff;text-align:center;min-width:90px">
-            Books<br><span style="font-size:9px;opacity:.8;font-weight:500">Paid / Total</span>
-          </th>
           ${MONTHS.map(m=>`<th style="padding:8px 3px;color:#fff;text-align:center;min-width:30px;font-size:10px;font-weight:700">${m}</th>`).join('')}
           <th style="padding:8px 4px;color:#fff;text-align:center;min-width:30px;font-size:10px">T1</th>
           <th style="padding:8px 4px;color:#fff;text-align:center;min-width:30px;font-size:10px">T2</th>
@@ -6929,7 +6920,7 @@ function loadFeeRegister(){
       <tbody>${rows}</tbody>
       <tfoot>
         <tr style="background:#f0f4ff;border-top:2.5px solid #1a3a6b">
-          <td colspan="${4+12+3}" style="padding:11px 10px;text-align:right;font-weight:900;color:#1a3a6b;font-size:13px">
+          <td colspan="${3+12+3}" style="padding:11px 10px;text-align:right;font-weight:900;color:#1a3a6b;font-size:13px">
             CLASS TOTAL — ${cls}:
           </td>
           <td style="padding:11px 10px;text-align:right;font-weight:900;color:#15803d;font-size:14px">
@@ -8917,7 +8908,7 @@ function buildNewAdmissionPanel(nextSession, allSessions){
     if(a.class<b.class)return -1; if(a.class>b.class)return 1; return (a.roll||0)-(b.roll||0);
   });
 
-  naEnsureRecords(nextStudents);
+  naEnsureRecords(nextStudents);   // also runs the one-time books migration
   const naRows = nextStudents.map(s=>({s,...naTotals(s)}));
   const rows = naRows.map(({s,plan,t})=>`<tr>
       <td style="font-weight:800;color:#1a3a6b">${esc(s.name)}</td>
@@ -9394,7 +9385,7 @@ function renderPromoList(){
     const bg=sp?'#fffbeb':(i%2===0?'white':'#fafcff');
     const prevCell=p.total>0
       ? `<div style="font-weight:900;color:#dc2626">${promoInr(p.total)}</div>
-         <div style="font-size:10px;color:#9a3412;line-height:1.35">${p.admDue>0?'Admission '+promoInr(p.admDue)+'<br>':''}${p.monthlyDue>0?'Monthly '+p.monthN+' mo · '+promoInr(p.monthlyDue)+'<br>':''}${p.examDue>0?'Exam '+promoInr(p.examDue)+'<br>':''}${p.booksDue>0?'Books '+promoInr(p.booksDue):''}</div>
+         <div style="font-size:10px;color:#9a3412;line-height:1.35">${p.admDue>0?'Admission + books '+promoInr(p.admDue)+'<br>':''}${p.monthlyDue>0?'Monthly '+p.monthN+' mo · '+promoInr(p.monthlyDue)+'<br>':''}${p.examDue>0?'Exam '+promoInr(p.examDue)+'<br>':''}${p.booksDue>0?'Books '+promoInr(p.booksDue):''}</div>
          <button onclick="promoCollectPrev('${s.id}')" style="margin-top:4px;padding:3px 9px;background:#dc2626;color:white;border:none;border-radius:6px;font-size:11px;font-weight:800;cursor:pointer"><i class="fas fa-rupee-sign"></i> Collect</button>`
       : `<span style="background:#f0fdf4;color:#15803d;padding:3px 10px;border-radius:8px;font-size:11px;font-weight:800">✓ Clear</span>`;
     const chCell=!inf.plan
@@ -9549,7 +9540,7 @@ function openPromoCharges(id){
     <div style="font-size:12px;color:#475569">${esc(s.class)} (${PROMO.session}) → <b style="color:#0d9488">${esc(toClass)}</b> (${toSession}) ${sp?`<span style="color:#b45309;font-weight:800">· ${sp}</span>`:''}</div>
   </div>
   ${prev.total>0?`<div style="background:#fff1f2;border:1.5px solid #fca5a5;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#b91c1c">
-      <b>⚠️ ${PROMO.session} dues pending: ${promoInr(prev.total)}</b> — Admission ${promoInr(prev.admDue)} · Monthly ${prev.monthN} mo ${promoInr(prev.monthlyDue)} · Exam ${promoInr(prev.examDue)}${prev.booksDue>0?' · Books '+promoInr(prev.booksDue):''}<br>
+      <b>⚠️ ${PROMO.session} dues pending: ${promoInr(prev.total)}</b> — Admission + books ${promoInr(prev.admDue)} · Monthly ${prev.monthN} mo ${promoInr(prev.monthlyDue)} · Exam ${promoInr(prev.examDue)}${prev.booksDue>0?' · Books '+promoInr(prev.booksDue):''}<br>
       This student cannot be promoted until these are cleared.
       <button class="btn btn-sm" style="margin-left:8px;background:#dc2626;color:white;border:none" onclick="closeModal();openCollectFee('${id}')">Collect previous dues</button></div>`
     :`<div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;padding:8px 14px;margin-bottom:12px;font-size:12px;color:#15803d;font-weight:800">✓ ${PROMO.session} dues are clear</div>`}
@@ -9680,10 +9671,10 @@ function executePromotion(){
     const lastMode=(plan.payments&&plan.payments.length)?plan.payments[plan.payments.length-1].mode:'Cash';
     const nf={
       previousYears:[...(oldFee.previousYears||[]),{session:oldSession,class:oldClass,roll:oldRoll,...oldFee,previousYears:undefined}],
-      admissionTotal:t.admTotal, admissionSet:true, admissionPaid:t.admPaid,
-      admissionHistory:t.admPaid>0?[{date:today(),amount:t.admPaid,mode:lastMode,note:'Collected before promotion'}]:[],
+      admissionTotal:t.grand, admissionSet:true, admissionPaid:Math.min(t.paid,t.grand),
+      admissionHistory:t.paid>0?[{date:today(),amount:Math.min(t.paid,t.grand),mode:lastMode,note:'Admission + books collected before promotion'}]:[],
       monthly:{}, exam:{},
-      books:{session:toSession,class:toClass,items:(plan.books||[]).filter(b=>b.take!==false).map(b=>({name:b.name,price:b.price})),total:t.booksTotal,paid:t.booksPaid},
+      books:{session:toSession,class:toClass,combined:true,admissionFee:t.admTotal,items:(plan.books||[]).map(b=>({id:b.id,name:b.name,price:b.price,take:b.take!==false})),total:t.booksTotal},
       promoPayments:plan.payments||[]
     };
     let wallet=parseFloat(oldFee.wallet)||0; const wh=[...(oldFee.walletHistory||[])];
@@ -9701,16 +9692,33 @@ function executePromotion(){
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+try{ feesBooksMigrate(); }catch(e){}
 //  NEW ADMISSIONS — admission fee + ALL books for the class (editable per student)
 //  Admission lives in fees[id].admissionTotal/admissionPaid (so Fee Register / Due Report agree).
 //  Books live in fees[id].books = {session,class,items:[{id,name,price,take}],total,paid,history}.
 //  A student with no books record owes the class's full book list by default.
 // ═══════════════════════════════════════════════════════════════════════════
 let _naModal=null;
+// One-time conversion of v103/v104 records (where books had their own "paid") to the combined model.
+function feesBooksMigrate(){
+  const fees=ls('fees')||{}; let changed=false;
+  Object.keys(fees).forEach(id=>{
+    const f=fees[id]; if(!f||!f.books||f.books.combined) return;
+    const bt=parseFloat(f.books.total)||0, bp=parseFloat(f.books.paid)||0;
+    const admOnly=parseFloat(f.admissionTotal)||0;
+    f.books.admissionFee=admOnly;
+    f.admissionTotal=Math.round((admOnly+bt)*100)/100;
+    f.admissionPaid=Math.round(((parseFloat(f.admissionPaid)||0)+bp)*100)/100;
+    f.admissionSet=true; f.books.combined=true; delete f.books.paid;
+    changed=true;
+  });
+  if(changed) ss('fees',fees);
+}
+// Admission fee and books are ONE combined fee:  admissionTotal = admission + books taken.
 function naBuild(s){
   const sf=(ls('fees')||{})[s.id]||{};
   const clsBooks=getPromoBooks(s.class);
-  const rec=(sf.books&&String(sf.books.session)===String(s.session))?sf.books:null;
+  const rec=(sf.books&&sf.books.combined&&String(sf.books.session)===String(s.session))?sf.books:null;
   let books;
   if(rec){
     const items=rec.items||[];
@@ -9724,25 +9732,26 @@ function naBuild(s){
     books=clsBooks.map(b=>({id:b.id,name:b.name,price:parseFloat(b.price)||0,take:true}));
   }
   const stored=parseFloat(sf.admissionTotal);
-  const admTotal=sf.admissionSet?(stored||0):(stored>0?stored:(parseFloat(getEffectiveFee(s.id,'admission',s.class))||0));
-  const paid=(parseFloat(sf.admissionPaid)||0)+(rec?(parseFloat(rec.paid)||0):0);
-  return {plan:{admTotal,books,paid}};
+  const admOnly=rec?(rec.admissionFee!=null?(parseFloat(rec.admissionFee)||0):Math.max(0,(stored||0)-(parseFloat(rec.total)||0)))
+                   :(sf.admissionSet?(stored||0):(stored>0?stored:(parseFloat(getEffectiveFee(s.id,'admission',s.class))||0)));
+  return {plan:{admTotal:admOnly,books,paid:parseFloat(sf.admissionPaid)||0}};
 }
-// Make sure every advance-admitted student has a saved admission+books record, so the
-// Fee Register / Collect Fee / Due Report show the same numbers as the New Admissions tab.
-// Money already recorded as "admission paid" beyond the admission fee is moved to books.
+// Make sure every advance-admitted student has a saved record, so Fee Register / Collect Fee /
+// Due Report show the same combined figures as the New Admissions tab.
 function naEnsureRecords(students){
-  const fees=ls('fees')||{}; let changed=false;
+  feesBooksMigrate();
+  const fees=ls('fees')||{}; let changed=false; const credits=[];
   students.forEach(s=>{
     const sf=fees[s.id]||{};
-    if(sf.books&&String(sf.books.session)===String(s.session)) return;
+    if(sf.books&&sf.books.combined&&String(sf.books.session)===String(s.session)) return;
     const {plan}=naBuild(s); const t=promoPlanTotals(plan);
     if(!t.booksAll) return;                       // class has no books set -> nothing to record
-    sf.admissionTotal=t.admTotal; sf.admissionSet=true; sf.admissionPaid=t.admPaid;
-    sf.books={session:s.session,class:s.class,items:plan.books.map(b=>({id:b.id,name:b.name,price:b.price,take:b.take})),total:t.booksTotal,paid:t.booksPaid,history:[]};
-    fees[s.id]=sf; changed=true;
+    sf.admissionTotal=t.grand; sf.admissionSet=true; sf.admissionPaid=Math.min(t.paid,t.grand);
+    sf.books={session:s.session,class:s.class,combined:true,admissionFee:t.admTotal,items:plan.books.map(b=>({id:b.id,name:b.name,price:b.price,take:b.take})),total:t.booksTotal};
+    fees[s.id]=sf; changed=true; if(t.excess>0) credits.push([s.id,t.excess]);
   });
   if(changed) ss('fees',fees);
+  credits.forEach(([id,x])=>creditWallet(id,x,'Excess admission payment'));
 }
 function naTotals(s){ const {plan}=naBuild(s); return {plan,t:promoPlanTotals(plan)}; }
 function naRefresh(){
@@ -9752,6 +9761,7 @@ function naRefresh(){
 }
 function naRefreshAll(){ naRefresh(); if(document.getElementById('feeRegisterTable')&&typeof loadFeeRegister==='function') loadFeeRegister(); }
 function openNewAdmCharges(id){
+  feesBooksMigrate();
   const s=(ls('students')||[]).find(x=>x.id===id); if(!s){ toast('Student not found','error'); return; }
   const {plan}=naBuild(s); const t=promoPlanTotals(plan);
   _naModal={id,plan:JSON.parse(JSON.stringify(plan))};
@@ -9822,18 +9832,12 @@ function naModalSave(collect){
   }
   const tt=promoPlanTotals({admTotal,books,paid:r2(m.plan.paid+pay)});
   const fees=ls('fees')||{}; const sf=fees[m.id]||{};
-  const oldAdmPaid=parseFloat(sf.admissionPaid)||0;
-  const sameBooks=sf.books&&String(sf.books.session)===String(s.session);
-  const oldBooksPaid=sameBooks?(parseFloat(sf.books.paid)||0):0;
-  sf.admissionTotal=tt.admTotal; sf.admissionSet=true; sf.admissionPaid=tt.admPaid;
-  const admDelta=r2(tt.admPaid-oldAdmPaid);
-  if(admDelta>0) sf.admissionHistory=[...(sf.admissionHistory||[]),{date:today(),amount:admDelta,mode}];
-  const bDelta=r2(tt.booksPaid-oldBooksPaid);
-  const hist=sameBooks?(sf.books.history||[]):[];
-  sf.books={session:s.session,class:s.class,items:books.map(b=>({id:b.id,name:b.name,price:b.price,take:b.take})),
-    total:tt.booksTotal,paid:tt.booksPaid,history:bDelta>0?[...hist,{date:today(),amount:bDelta,mode}]:hist};
+  sf.admissionTotal=tt.grand; sf.admissionSet=true; sf.admissionPaid=Math.min(tt.paid,tt.grand);   // ONE combined fee
+  if(pay>0) sf.admissionHistory=[...(sf.admissionHistory||[]),{date:today(),amount:pay,mode,note:'Admission + books'}];
+  sf.books={session:s.session,class:s.class,combined:true,admissionFee:tt.admTotal,
+    items:books.map(b=>({id:b.id,name:b.name,price:b.price,take:b.take})),total:tt.booksTotal};
   fees[m.id]=sf; ss('fees',fees);
-  if(tt.excess>0) creditWallet(m.id,tt.excess,'Excess admission/books payment');   // never lose the parent's money
+  if(tt.excess>0) creditWallet(m.id,tt.excess,'Excess admission + books payment');   // never lose the parent's money
   let rId=null;
   if(pay>0) rId=saveReceiptV5(m.id,'Admission & Books',pay,mode,`Admission & Books for ${s.class} (${s.session})`,[],tt.due);
   closeModal(); naRefreshAll();
@@ -17751,6 +17755,7 @@ function printReceiptModal(rId){printReceiptV5(rId);}
 //  V5-8: UPDATED DUE REPORT (uses getEffectiveFee)
 // ─────────────────────────────────────────────────────
 function generateDueReport(){
+  try{feesBooksMigrate();}catch(e){}
   const cls=document.getElementById('drClass')?.value||'';
   const type=document.getElementById('drType')?.value||'';
   const overdueOnly=document.getElementById('drOverdue')?.value==='yes';
@@ -21151,6 +21156,7 @@ function reImportXlsx(){
 
 // 3. ═══ DEFINITIVE openCollectFee — fixes all prior broken versions ═══
 function openCollectFee(studentId){
+  try{feesBooksMigrate();}catch(e){}
   const students = ls('students')||[];
   const s = students.find(x=>x.id===studentId);
   if(!s){toast('Student not found','error');return;}
@@ -21210,9 +21216,9 @@ function openCollectFee(studentId){
     </div>
   </div>
 
-  ${(()=>{ const bt=computeStudentFeeTotals(s); if(!(bt.booksTotal>0)) return ''; return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:${bt.booksDue>0?'#fff7ed':'#f0fdf4'};border:1.5px solid ${bt.booksDue>0?'#fdba74':'#bbf7d0'};border-radius:10px;padding:9px 13px;margin-bottom:12px">
-      <div style="font-size:12px;font-weight:800;color:#1a3a6b">📚 Books: ₹${bt.booksPaid.toLocaleString('en-IN')} paid of ₹${bt.booksTotal.toLocaleString('en-IN')} ${bt.booksDue>0?`<span style="color:#b91c1c">· Due ₹${bt.booksDue.toLocaleString('en-IN')}</span>`:'<span style="color:#15803d">· ✓ Paid</span>'}</div>
-      <button class="btn btn-sm btn-success" onclick="closeModal();openNewAdmCharges('${s.id}')"><i class="fas fa-book"></i> Books / Admission & Books</button></div>`; })()}
+  ${(()=>{ const bt=computeStudentFeeTotals(s); if(!(bt.booksTotal>0)) return ''; return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#f5f3ff;border:1.5px solid #ddd6fe;border-radius:10px;padding:9px 13px;margin-bottom:12px">
+      <div style="font-size:12px;font-weight:800;color:#1a3a6b">📚 Admission fee includes books: ₹${(bt.admTotal-bt.booksTotal).toLocaleString('en-IN')} admission + ₹${bt.booksTotal.toLocaleString('en-IN')} books = ₹${bt.admTotal.toLocaleString('en-IN')}</div>
+      <button class="btn btn-sm btn-success" onclick="closeModal();openNewAdmCharges('${s.id}')"><i class="fas fa-book"></i> Edit books</button></div>`; })()}
   <div class="tabs" style="margin-bottom:0">
     <button class="tab active" onclick="switchFeeTab('ftAdm8',this)">🏷️ Admission</button>
     <button class="tab" onclick="switchFeeTab('ftMonthly8',this)">📅 Monthly</button>
