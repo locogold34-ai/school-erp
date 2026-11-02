@@ -8754,6 +8754,7 @@ function renderPromotion(){
     <button class="tab promo-tab" onclick="switchPromoTab('ptPromote',this)"><i class="fas fa-arrow-up"></i> Promote Students</button>
     <button class="tab promo-tab" onclick="switchPromoTab('ptNewAdmission',this)"><i class="fas fa-user-plus"></i> New Admissions</button>
     <button class="tab promo-tab" onclick="switchPromoTab('ptFeeReport',this)"><i class="fas fa-rupee-sign"></i> Fee Due Report</button>
+    <button class="tab promo-tab" onclick="switchPromoTab('ptSetup',this)"><i class="fas fa-book"></i> Admission &amp; Books Setup</button>
   </div>
 
   <!-- TAB: Overview -->
@@ -8766,25 +8767,36 @@ function renderPromotion(){
     <div class="card" style="padding:18px;margin-bottom:16px">
       <div style="font-size:13px;font-weight:900;color:#0d1f3c;margin-bottom:12px"><i class="fas fa-info-circle" style="color:#3b82f6"></i> Promote students from ${curSession} → ${nextSession}</div>
       <div style="background:#fff7ed;border:1.5px solid #fdba74;border-radius:10px;padding:10px 14px;font-size:12px;color:#92400e;margin-bottom:14px">
-        <b>⚠️ Note:</b> Promotion moves students to the next class in session ${nextSession}. Current year fee history is <b>preserved</b>. New year fees start fresh.
+        <b>⚠️ How it works:</b> A student can move up only after (1) all <b>${curSession}</b> dues are paid and (2) the <b>new session admission fee + books</b> are paid. Each student can have his/her own <b>Promote To</b> class (skip a class, repeat, change section). Set the admission fee and book prices in the <b>Admission &amp; Books Setup</b> tab. ${curSession} fee history is <b>preserved</b>.
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end">
         <div class="form-group" style="margin:0"><label>From Class</label>
-          <select id="promFrom" class="form-control" onchange="loadPromotionStudents()">
-            ${getAllClasses().map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+          <select id="promFrom" class="form-control" onchange="promoFromChanged()">
+            ${getAllClasses().map((c,i)=>`<option value="${esc(c)}" ${i===0?'selected':''}>${esc(c)}</option>`).join('')}
           </select>
         </div>
         <div class="form-group" style="margin:0"><label>To Class</label>
-          <select id="promTo" class="form-control">
+          <select id="promTo" class="form-control" onchange="promoToChanged()">
             ${getAllClasses().map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
           </select>
         </div>
         <div class="form-group" style="margin:0"><label>Target Session</label>
-          <select id="promToSession" class="form-control">
+          <select id="promToSession" class="form-control" onchange="loadPromotionStudents()">
             ${allSessions.filter(s=>parseInt(s)>=parseInt(curSession)).map(s=>`<option value="${s}" ${s===nextSession?'selected':''}>${s}</option>`).join('')}
           </select>
         </div>
-        <button class="btn btn-primary" style="height:42px" onclick="loadPromotionStudents()"><i class="fas fa-search"></i> Load</button>
+        <button class="btn btn-primary" style="height:42px" onclick="loadPromotionStudents()"><i class="fas fa-sync"></i> Load</button>
+      </div>
+      <div style="display:grid;grid-template-columns:minmax(150px,200px) 1fr auto;gap:10px;align-items:end;margin-top:12px">
+        <div class="form-group" style="margin:0"><label>Student Year (Session) to search</label>
+          <select id="promFromSession" class="form-control" onchange="promoFromSessionChanged()">
+            ${promoAllSessions().map(x=>`<option value="${x}" ${x===String(curSession)?'selected':''}>${x}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group" style="margin:0"><label>Search student <span style="font-weight:600;color:#9aa8c0">(searches all classes of the selected year)</span></label>
+          <input id="promSearch" class="form-control" type="search" placeholder="Name, roll, student ID, father / mother name, phone…" oninput="promoSearchChanged(this.value)" autocomplete="off">
+        </div>
+        <button class="btn btn-outline" style="height:42px" onclick="promoSearchClear()"><i class="fas fa-times"></i> Clear</button>
       </div>
     </div>
     <div id="promotionList"></div>
@@ -8799,11 +8811,16 @@ function renderPromotion(){
   <div id="ptFeeReport" style="display:none;padding-top:16px">
     ${buildFeeReport(curSession)}
   </div>
+
+  <!-- TAB: Admission & Books Setup -->
+  <div id="ptSetup" style="display:none;padding-top:16px">
+    ${buildPromoSetupPanel()}
+  </div>
   `;
 }
 
 function switchPromoTab(id, btn){
-  ['ptOverview','ptPromote','ptNewAdmission','ptFeeReport'].forEach(t=>{
+  ['ptOverview','ptPromote','ptNewAdmission','ptFeeReport','ptSetup'].forEach(t=>{
     const el=document.getElementById(t); if(el) el.style.display='none';
   });
   const el=document.getElementById(id); if(el) el.style.display='block';
@@ -8884,36 +8901,27 @@ function buildNewAdmissionPanel(nextSession, allSessions){
     if(a.class<b.class)return -1; if(a.class>b.class)return 1; return (a.roll||0)-(b.roll||0);
   });
 
-  const rows = nextStudents.map(s=>{
-    const sf = fees[s.id]||{};
-    const admTotal = getEffectiveFee(s.id,'admission',s.class);
-    const admPaid = sf.admissionPaid||0;
-    const admDue = Math.max(0, admTotal-admPaid);
-    return `<tr>
+  const naRows = nextStudents.map(s=>({s,...naTotals(s)}));
+  const rows = naRows.map(({s,plan,t})=>`<tr>
       <td style="font-weight:800;color:#1a3a6b">${esc(s.name)}</td>
       <td style="font-size:11px;color:#6b7a99">${esc(s.fatherName||'—')}</td>
       <td><span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700">${esc(s.class)}</span></td>
       <td style="text-align:center;font-weight:800;color:#c9a84c">${s.roll}</td>
       <td style="font-size:11px">${s.phone||'—'}</td>
       <td>
-        <div style="font-size:11px"><span style="color:#15803d;font-weight:800">₹${admPaid}</span> paid</div>
-        ${admDue>0?`<div style="font-size:10px;color:#dc2626;font-weight:700">₹${admDue} due</div>`:'<div style="font-size:10px;color:#15803d">✓ Clear</div>'}
+        <div style="font-size:11px;color:#475569">Total <b>${promoInr(t.grand)}</b> · Paid <b style="color:#15803d">${promoInr(t.paid)}</b></div>
+        ${t.due>0?`<div style="font-size:11px;color:#dc2626;font-weight:800">${promoInr(t.due)} due</div>`:'<div style="font-size:11px;color:#15803d;font-weight:800">✓ Fully paid</div>'}
+        <div style="font-size:10px;color:#6b7a99">Adm ${promoInr(t.admTotal)} + ${t.booksCount}/${t.booksAll} books ${promoInr(t.booksTotal)}</div>
       </td>
       <td style="font-size:11px;color:#6b7a99">${s.admissionDate||s.createdAt||'—'}</td>
-      <td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-sm btn-success" onclick="openNewAdmCharges('${s.id}')" title="Admission fee + books"><i class="fas fa-book"></i> Adm + Books</button>
         <button class="btn btn-sm btn-warning" onclick="openEditStudent('${s.id}')"><i class="fas fa-edit"></i></button>
-        <button class="btn btn-sm btn-primary" onclick="openCollectFee('${s.id}')"><i class="fas fa-rupee-sign"></i></button>
+        <button class="btn btn-sm btn-primary" onclick="openCollectFee('${s.id}')" title="Other fees"><i class="fas fa-rupee-sign"></i></button>
       </td>
-    </tr>`;
-  }).join('');
-
-  const totalAdmDue = nextStudents.reduce((sum,s)=>{
-    const sf=fees[s.id]||{};
-    return sum+Math.max(0,getEffectiveFee(s.id,'admission',s.class)-(sf.admissionPaid||0));
-  },0);
-  const totalAdmPaid = nextStudents.reduce((sum,s)=>{
-    return sum+(fees[s.id]?.admissionPaid||0);
-  },0);
+    </tr>`).join('');
+  const totalAdmDue  = naRows.reduce((a,r)=>a+r.t.due,0);
+  const totalAdmPaid = naRows.reduce((a,r)=>a+r.t.paid,0);
 
   return `
   <!-- Quick Add Button -->
@@ -8921,7 +8929,7 @@ function buildNewAdmissionPanel(nextSession, allSessions){
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
       <div>
         <div style="font-size:15px;font-weight:900;color:#1e3a5f">Advance Admissions for ${nextSession}</div>
-        <div style="font-size:12px;color:#3b82f6;margin-top:2px">Admit students now for the upcoming session. They will appear in this list.</div>
+        <div style="font-size:12px;color:#3b82f6;margin-top:2px">Admit students now for the upcoming session. Every new student pays the <b>admission fee + all books</b> of the class (amounts come from the <b>Admission &amp; Books Setup</b> tab; you can edit them or drop a book for any one student).</div>
       </div>
       <button class="btn btn-primary" style="font-size:14px;padding:10px 20px" onclick="openAddStudentForSession('${nextSession}')">
         <i class="fas fa-user-plus"></i> Add New Student for ${nextSession}
@@ -8937,11 +8945,11 @@ function buildNewAdmissionPanel(nextSession, allSessions){
       <div style="font-size:26px;font-weight:900;color:#1a3a6b">${nextStudents.length}</div>
     </div>
     <div style="background:white;border-radius:12px;padding:14px 16px;border:1.5px solid #e2e8f0;box-shadow:0 2px 8px rgba(0,0,0,.05)">
-      <div style="font-size:10px;font-weight:800;color:#6b7a99;text-transform:uppercase;margin-bottom:4px">Admission Fee Collected</div>
+      <div style="font-size:10px;font-weight:800;color:#6b7a99;text-transform:uppercase;margin-bottom:4px">Admission + Books Collected</div>
       <div style="font-size:26px;font-weight:900;color:#15803d">₹${totalAdmPaid.toLocaleString('en-IN')}</div>
     </div>
     <div style="background:white;border-radius:12px;padding:14px 16px;border:${totalAdmDue>0?'1.5px solid #fca5a5':'1.5px solid #d1fae5'};box-shadow:0 2px 8px rgba(0,0,0,.05)">
-      <div style="font-size:10px;font-weight:800;color:#6b7a99;text-transform:uppercase;margin-bottom:4px">Admission Fee Pending</div>
+      <div style="font-size:10px;font-weight:800;color:#6b7a99;text-transform:uppercase;margin-bottom:4px">Admission + Books Pending</div>
       <div style="font-size:26px;font-weight:900;color:${totalAdmDue>0?'#dc2626':'#15803d'}">₹${totalAdmDue.toLocaleString('en-IN')}</div>
     </div>
   </div>
@@ -8951,7 +8959,7 @@ function buildNewAdmissionPanel(nextSession, allSessions){
       <table>
         <thead><tr>
           <th>Student Name</th><th>Father</th><th>Class</th><th style="text-align:center">Roll</th>
-          <th>Phone</th><th>Admission Fee</th><th>Admit Date</th><th>Actions</th>
+          <th>Phone</th><th>Admission + Books</th><th>Admit Date</th><th>Actions</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -8969,7 +8977,7 @@ function openAddStudentForSession(session){
   openAddStudent();
   // After modal opens, pre-select the target session
   setTimeout(()=>{
-    const sel = document.getElementById('sSession');
+    const sel = document.getElementById('asSession');
     if(sel) sel.value = session;
   }, 100);
 }
@@ -9087,317 +9095,733 @@ function sendBulkDueReminders(){
   if(!count) toast('No students with phone numbers and dues found','error');
 }
 
-// Original promote functions (updated)
-function loadPromotionStudents(){
-  const fromClass = document.getElementById('promFrom')?.value;
-  const toSession = document.getElementById('promToSession')?.value;
-  const session   = getActiveSession();
-  const students  = (ls('students')||[]).filter(s=>s.session===session&&s.class===fromClass).sort((a,b)=>a.roll-b.roll);
-  const fees      = ls('fees')||{};
-  const cm        = currMonth();
+// ═══════════════════════════════════════════════════════════════════════════
+//  PROMOTION v2
+//  • Previous-session dues must be CLEAR before a student can move up
+//  • New-session admission fee + books must be PAID before a student can move up
+//  • Every student can have his/her OWN target class (skip a class, repeat, section change)
+//  • Admission fee + book prices are editable (Admission & Books Setup tab, and per student)
+//  Stores (both cloud-synced):
+//    promoBooks     { "Class 1 A":[{id,name,price}] }
+//    promoPayments  { studentId:{toClass,toSession,admTotal,books:[{id,name,price,take}],paid,payments:[]} }
+//  Admission fee per class lives in feeStructure.classFees[cls].admissionFee (same as Fee Settings).
+// ═══════════════════════════════════════════════════════════════════════════
+let PROMO = {fromClass:'', toSession:'', session:'', list:[], rows:{}, q:''};
+let _promoFullYear = false;
+let _promoModal = null;
 
-  // Auto-set "to class"
-  const toSel = document.getElementById('promTo');
-  if(toSel&&!toSel.dataset.manualSet){
-    const ni = getAllClasses().indexOf(fromClass)+1;
-    const nxtCls = getAllClasses()[ni];
-    if(nxtCls) toSel.value = nxtCls;
-  }
-  const toClass = document.getElementById('promTo')?.value;
+function promoInr(n){ return '₹'+(Math.round((parseFloat(n)||0)*100)/100).toLocaleString('en-IN'); }
 
-  if(!students.length){
-    document.getElementById('promotionList').innerHTML =
-      `<div style="background:white;border-radius:12px;padding:30px;text-align:center;color:#aab">
-        <i class="fas fa-users" style="font-size:32px;margin-bottom:10px;display:block"></i>
-        No students in <b>${fromClass}</b> for session <b>${session}</b>
-      </div>`;
-    return;
-  }
+// ── class helpers ──────────────────────────────────────────────────────────
+function promoGroupOf(c){ const m=String(c).match(/^(.*\S)\s+([A-Z])$/); return m?m[1]:c; }
+function promoSecOf(c){ const m=String(c).match(/^(.*\S)\s+([A-Z])$/); return m?m[2]:''; }
+function promoGroups(){ const g=[]; getAllClasses().forEach(c=>{ const x=promoGroupOf(c); if(!g.includes(x)) g.push(x); }); return g; }
+function promoNextClass(cls){
+  const g=promoGroups(), gi=g.indexOf(promoGroupOf(cls));
+  if(gi<0||gi>=g.length-1) return '';
+  const cands=getAllClasses().filter(c=>promoGroupOf(c)===g[gi+1]);
+  return cands.find(c=>promoSecOf(c)===promoSecOf(cls))||cands[0]||'';
+}
+function promoSpecialLabel(from,to){
+  const g=promoGroups(); const d=g.indexOf(promoGroupOf(to))-g.indexOf(promoGroupOf(from));
+  if(d===1) return '';
+  if(d===0) return to===from ? '🔁 Same class (repeat)' : '↔ Same class, other section';
+  if(d>1) return `⏩ Skips ${d-1} class${d>2?'es':''}`;
+  return '⏪ Lower class';
+}
 
-  document.getElementById('promotionList').innerHTML = `
-  <div class="card" style="padding:20px">
+// ── store helpers ──────────────────────────────────────────────────────────
+function getPromoBooks(cls){ const all=ls('promoBooks')||{}; return Array.isArray(all[cls])?all[cls]:[]; }
+function setPromoBooks(cls,arr){ const all=ls('promoBooks')||{}; all[cls]=arr; ss('promoBooks',all); }
+function getClassAdmissionFee(cls){
+  const fs=ls('feeStructure')||{}; const cf=(fs.classFees||{})[cls]||{};
+  return parseFloat(cf.admissionFee ?? fs.admissionFee ?? 500)||0;
+}
+function setClassAdmissionFee(cls,v){
+  const fs=ls('feeStructure')||{}; if(!fs.classFees) fs.classFees={}; if(!fs.classFees[cls]) fs.classFees[cls]={};
+  fs.classFees[cls].admissionFee=v; ss('feeStructure',fs);
+}
 
-    <!-- Header info -->
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px">
-      <div>
-        <div style="font-size:15px;font-weight:900;color:#0d1f3c">
-          <i class="fas fa-arrow-right" style="color:#c9a84c"></i>
-          Promoting: <span style="color:#1a3a6b">${fromClass}</span>
-          → <span style="color:#0d9488">${toClass||'—'}</span>
-          &nbsp;|&nbsp; Session <span style="background:#1a3a6b;color:white;padding:2px 10px;border-radius:8px;font-size:12px">${toSession}</span>
-        </div>
-        <div style="font-size:12px;color:#6b7a99;margin-top:4px">${students.length} students · Assign new roll numbers for ${toSession} in the column below</div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button onclick="autoFillRolls()" style="padding:7px 14px;background:#f0f4ff;color:#1a3a6b;border:1.5px solid #c7d7f4;border-radius:8px;font-weight:800;font-size:12px;cursor:pointer">
-          <i class="fas fa-magic"></i> Auto-fill Rolls (1,2,3…)
-        </button>
-        <button onclick="copyOldRolls()" style="padding:7px 14px;background:#f0fdf4;color:#15803d;border:1.5px solid #86efac;border-radius:8px;font-weight:800;font-size:12px;cursor:pointer">
-          <i class="fas fa-copy"></i> Keep Same Rolls
-        </button>
-      </div>
+// ── per-student plan (new-session admission + books) ───────────────────────
+function promoPlanTotals(p){
+  const r2=x=>Math.round(x*100)/100;
+  const taken=(p.books||[]).filter(b=>b.take!==false);
+  const booksTotal=r2(taken.reduce((a,b)=>a+(parseFloat(b.price)||0),0));
+  const admTotal=r2(parseFloat(p.admTotal)||0);
+  const grand=r2(admTotal+booksTotal), paid=r2(parseFloat(p.paid)||0);
+  return { admTotal, booksTotal, grand, paid,
+    due:Math.max(0,r2(grand-paid)), excess:Math.max(0,r2(paid-grand)),
+    admPaid:Math.min(admTotal,paid), booksPaid:Math.min(booksTotal,Math.max(0,r2(paid-admTotal))),
+    booksCount:taken.length, booksAll:(p.books||[]).length };
+}
+function promoPlanFor(id,toClass,toSession){
+  const p=(ls('promoPayments')||{})[id];
+  return (p&&p.toClass===toClass&&p.toSession===toSession)?p:null;
+}
+function promoBuildPlan(s,toClass,toSession){
+  const old=(ls('promoPayments')||{})[s.id];   // keep money already collected, even if class/session changed
+  return { studentId:s.id, toClass, toSession, admTotal:getClassAdmissionFee(toClass),
+    books:getPromoBooks(toClass).map(b=>({id:b.id,name:b.name,price:parseFloat(b.price)||0,take:true})),
+    paid:old?(parseFloat(old.paid)||0):0, payments:old?(old.payments||[]):[], updatedAt:new Date().toISOString() };
+}
+function promoSavePlan(plan){ const all=ls('promoPayments')||{}; plan.updatedAt=new Date().toISOString(); all[plan.studentId]=plan; ss('promoPayments',all); }
+
+// ── previous-session dues ──────────────────────────────────────────────────
+function promoPrevDues(s){
+  const t=computeStudentFeeTotals(s);                       // same numbers as Due Report
+  const sf=(ls('fees')||{})[s.id]||{};
+  const rate=t.monthly;
+  const pastYear=parseInt(s.session)<new Date().getFullYear();
+  const upto=(_promoFullYear||pastYear)?11:currMonth();     // whole session if it has already ended
+  let n=0;
+  for(let m=0;m<=upto;m++){ const mf=(sf.monthly||{})[m]; if(!(mf&&mf.paid)&&rate>0) n++; }
+  const monthlyDue=n*rate;
+  return { admDue:t.admDue, monthN:n, monthlyDue, examDue:t.examDueAmt, total:t.admDue+monthlyDue+t.examDueAmt };
+}
+
+function promoRowInfo(s){
+  const st=PROMO.rows[s.id];
+  const prev=promoPrevDues(s);
+  const plan=promoPlanFor(s.id,st.to,PROMO.toSession);
+  const ch=plan?promoPlanTotals(plan):null;
+  const reasons=[];
+  if(prev.total>0) reasons.push(`Previous dues ${promoInr(prev.total)}`);
+  if(!plan) reasons.push('Admission & books not set');
+  else if(ch.due>0) reasons.push(`New session due ${promoInr(ch.due)}`);
+  return { prev, plan, ch, ready:reasons.length===0, reasons };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ADMISSION & BOOKS SETUP TAB
+// ═══════════════════════════════════════════════════════════════════════════
+function buildPromoSetupPanel(){
+  const classes=getAllClasses();
+  if(!window._promoSetupClass||!classes.includes(window._promoSetupClass)) window._promoSetupClass=classes[0];
+  return `<div id="promoSetupBody">${promoSetupInner()}</div>`;
+}
+function promoSetupInner(){
+  const classes=getAllClasses(), cls=window._promoSetupClass;
+  const books=getPromoBooks(cls), adm=getClassAdmissionFee(cls);
+  const bTotal=books.reduce((a,b)=>a+(parseFloat(b.price)||0),0);
+  const inp='padding:8px 10px;border:2px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;font-weight:700;color:#1a3a6b;outline:none';
+  const overview=classes.map(c=>{
+    const bk=getPromoBooks(c), bt=bk.reduce((a,b)=>a+(parseFloat(b.price)||0),0), a=getClassAdmissionFee(c);
+    return `<tr style="${c===cls?'background:#eff6ff':''};cursor:pointer" onclick="promoSetupSelect('${esc(c)}')">
+      <td style="padding:7px 10px;font-weight:800;color:#1a3a6b">${esc(c)}</td>
+      <td style="padding:7px 10px;text-align:right">${promoInr(a)}</td>
+      <td style="padding:7px 10px;text-align:center">${bk.length}</td>
+      <td style="padding:7px 10px;text-align:right">${promoInr(bt)}</td>
+      <td style="padding:7px 10px;text-align:right;font-weight:900;color:#15803d">${promoInr(a+bt)}</td></tr>`;
+  }).join('');
+  return `
+  <div class="card" style="padding:18px;margin-bottom:16px">
+    <div style="font-size:13px;font-weight:900;color:#0d1f3c;margin-bottom:4px"><i class="fas fa-book" style="color:#c9a84c"></i> Admission Fee &amp; Books — per class</div>
+    <div style="font-size:12px;color:#6b7a99;margin-bottom:14px">Set what a student pays when entering a class for the new session. When you promote a student to a class, these amounts load automatically — you can still change them for each student (or untick a book he/she does not want).</div>
+    <div style="display:grid;grid-template-columns:minmax(180px,260px) 1fr;gap:14px;align-items:end;margin-bottom:16px">
+      <div class="form-group" style="margin:0"><label>Class</label>
+        <select class="form-control" onchange="promoSetupSelect(this.value)">${classes.map(c=>`<option value="${esc(c)}" ${c===cls?'selected':''}>${esc(c)}</option>`).join('')}</select></div>
+      <div class="form-group" style="margin:0"><label>Admission Fee for ${esc(cls)} (₹) <span style="font-weight:600;color:#9aa8c0">— same value as Fee Settings</span></label>
+        <input type="number" min="0" value="${adm}" style="${inp};width:160px" onchange="promoSetupSaveAdm(this.value)"></div>
     </div>
-
-    <!-- Info banner -->
-    <div style="background:linear-gradient(135deg,#eff6ff,#f0f9ff);border:1.5px solid #bfdbfe;border-radius:10px;padding:10px 14px;margin-bottom:16px;font-size:12px;color:#1e40af;display:flex;gap:8px;align-items:flex-start">
-      <i class="fas fa-info-circle" style="margin-top:1px;flex-shrink:0"></i>
-      <div>
-        <b>New Roll Number Assignment:</b> Each student gets a new roll number valid for session <b>${toSession}</b> in class <b>${toClass}</b>.
-        Leave a field blank to keep the existing roll number. Old roll numbers from ${session} are preserved in their history.
-      </div>
-    </div>
-
-    <!-- Table -->
-    <div style="overflow-x:auto;border-radius:10px;border:1.5px solid #e2e8f0">
+    <div style="overflow-x:auto;border:1.5px solid #e2e8f0;border-radius:10px">
       <table style="width:100%;border-collapse:collapse;font-size:13px">
-        <thead>
-          <tr style="background:linear-gradient(135deg,#0d1f3c,#1a3a6b)">
-            <th style="padding:11px 14px;text-align:center;width:40px">
-              <input type="checkbox" id="promAllChk" onchange="toggleAllProm(this)" checked
-                style="width:16px;height:16px;cursor:pointer;accent-color:#f0c040">
-            </th>
-            <th style="padding:11px 14px;text-align:left;color:rgba(255,255,255,.7);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px">Student Name</th>
-            <th style="padding:11px 14px;text-align:center;color:rgba(255,255,255,.7);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px">
-              Old Roll<br><span style="font-size:9px;opacity:.6">(${session})</span>
-            </th>
-            <th style="padding:11px 14px;text-align:center;color:#f0c040;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;background:rgba(201,168,76,.15)">
-              ✏️ New Roll<br><span style="font-size:9px;opacity:.8">(${toSession})</span>
-            </th>
-            <th style="padding:11px 14px;text-align:center;color:rgba(255,255,255,.7);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px">Adm Fee</th>
-            <th style="padding:11px 14px;text-align:center;color:rgba(255,255,255,.7);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px">Monthly</th>
-            <th style="padding:11px 14px;text-align:center;color:rgba(255,255,255,.7);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px">Status</th>
-          </tr>
-        </thead>
+        <thead><tr style="background:linear-gradient(135deg,#0d1f3c,#1a3a6b);color:rgba(255,255,255,.85);font-size:11px;text-transform:uppercase">
+          <th style="padding:10px;width:44px">#</th><th style="padding:10px;text-align:left">Book / Item name</th><th style="padding:10px;width:150px;text-align:right">Price (₹)</th><th style="padding:10px;width:60px"></th></tr></thead>
         <tbody>
-          ${students.map((s,i)=>{
-            const sf    = fees[s.id]||{};
-            const admPaid  = sf.admissionPaid||0;
-            const admTotal = getEffectiveFee(s.id,'admission',s.class);
-            const mPaid    = Object.values(sf.monthly||{}).filter(x=>x.paid).length;
-            const mDue     = Math.max(0,(cm+1)-mPaid);
-            const hasDue   = (admPaid<admTotal)||mDue>0;
-            const initials = s.name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
-            const colors   = ['#1a3a6b','#0d9488','#7c3aed','#b45309','#be185d'];
-            const col      = colors[s.name.charCodeAt(0)%colors.length];
-            return `<tr style="border-bottom:1px solid #f0f4ff;background:${i%2===0?'white':'#fafcff'}"
-              onmouseover="this.style.background='#f0f9ff'" onmouseout="this.style.background='${i%2===0?'white':'#fafcff'}'">
-              <td style="padding:10px 14px;text-align:center">
-                <input type="checkbox" class="promChk" value="${s.id}" checked
-                  style="width:16px;height:16px;cursor:pointer;accent-color:#1a3a6b">
-              </td>
-              <td style="padding:10px 14px">
-                <div style="display:flex;align-items:center;gap:9px">
-                  <div style="width:34px;height:34px;border-radius:50%;background:${s.photo?'transparent':'linear-gradient(135deg,'+col+','+col+'cc)'};
-                    display:flex;align-items:center;justify-content:center;color:white;font-weight:900;font-size:12px;flex-shrink:0;overflow:hidden">
-                    ${s.photo?`<img src="${s.photo}" style="width:100%;height:100%;object-fit:cover">`:initials}
-                  </div>
-                  <div>
-                    <div style="font-weight:800;color:#1a3a6b;font-size:13px">${esc(s.name)}</div>
-                    <div style="font-size:10px;color:#9aa8c0">${s.studentId}${s.fatherName?' · F: '+esc(s.fatherName):''}</div>
-                  </div>
-                </div>
-              </td>
-              <td style="padding:10px 14px;text-align:center">
-                <span style="background:#f1f5f9;color:#475569;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:800">${s.roll}</span>
-              </td>
-              <td style="padding:10px 14px;text-align:center;background:rgba(201,168,76,.06)">
-                <input type="number" class="newRollInput" data-id="${s.id}" placeholder="${s.roll}"
-                  min="1" max="999" value=""
-                  style="width:72px;padding:6px 10px;border:2px solid #c9a84c;border-radius:8px;font-size:13px;
-                  font-weight:900;text-align:center;color:#1a3a6b;font-family:inherit;outline:none;background:#fffbeb;
-                  box-shadow:0 0 0 0px rgba(201,168,76,.3);transition:.15s"
-                  onfocus="this.style.borderColor='#1a3a6b';this.style.boxShadow='0 0 0 3px rgba(26,58,107,.15)'"
-                  onblur="this.style.borderColor='#c9a84c';this.style.boxShadow='none'"
-                  oninput="highlightRollDups()">
-              </td>
-              <td style="padding:10px 14px;text-align:center">
-                ${admPaid>=admTotal
-                  ? `<span style="background:#f0fdf4;color:#15803d;padding:3px 10px;border-radius:8px;font-size:11px;font-weight:800">✓ Paid</span>`
-                  : `<span style="background:#fff1f2;color:#dc2626;padding:3px 10px;border-radius:8px;font-size:11px;font-weight:800">₹${admTotal-admPaid} due</span>`}
-              </td>
-              <td style="padding:10px 14px;text-align:center">
-                ${mDue>0
-                  ? `<span style="background:#fff7ed;color:#d97706;padding:3px 10px;border-radius:8px;font-size:11px;font-weight:800">${mDue} mo due</span>`
-                  : `<span style="background:#f0fdf4;color:#15803d;padding:3px 10px;border-radius:8px;font-size:11px;font-weight:800">✓ Clear</span>`}
-              </td>
-              <td style="padding:10px 14px;text-align:center">
-                <span style="background:${hasDue?'#fff1f2':'#f0fdf4'};color:${hasDue?'#b91c1c':'#15803d'};
-                  padding:3px 10px;border-radius:8px;font-size:11px;font-weight:800">
-                  ${hasDue?'⚠️ Due':'✅ Ready'}
-                </span>
-              </td>
-            </tr>`;
-          }).join('')}
+          ${books.length?books.map((b,i)=>`<tr style="border-bottom:1px solid #f0f4ff">
+            <td style="padding:7px 10px;text-align:center;color:#9aa8c0;font-weight:800">${i+1}</td>
+            <td style="padding:7px 10px"><input type="text" value="${esc(b.name)}" style="${inp};width:100%" onchange="promoSetupEditBook('${b.id}','name',this.value)"></td>
+            <td style="padding:7px 10px;text-align:right"><input type="number" min="0" value="${parseFloat(b.price)||0}" style="${inp};width:120px;text-align:right" onchange="promoSetupEditBook('${b.id}','price',this.value)"></td>
+            <td style="padding:7px 10px;text-align:center"><button class="btn btn-sm" style="background:#fff1f2;color:#dc2626;border:1px solid #fca5a5" onclick="promoSetupDelBook('${b.id}')" title="Remove"><i class="fas fa-trash"></i></button></td></tr>`).join('')
+          :`<tr><td colspan="4" style="padding:22px;text-align:center;color:#9aa8c0">No books added for ${esc(cls)} yet — add them below.</td></tr>`}
+          <tr style="background:#fffbeb">
+            <td style="padding:8px 10px;text-align:center;color:#c9a84c;font-weight:900">+</td>
+            <td style="padding:8px 10px"><input type="text" id="psNewName" placeholder="New book / item (e.g. English Reader, Copy set, Uniform)" style="${inp};width:100%" onkeydown="if(event.key==='Enter')document.getElementById('psNewPrice').focus()"></td>
+            <td style="padding:8px 10px;text-align:right"><input type="number" min="0" id="psNewPrice" placeholder="0" style="${inp};width:120px;text-align:right" onkeydown="if(event.key==='Enter')promoSetupAddBook()"></td>
+            <td style="padding:8px 10px;text-align:center"><button class="btn btn-sm btn-primary" onclick="promoSetupAddBook()">Add</button></td></tr>
         </tbody>
+        <tfoot><tr style="background:#f0fdf4;font-weight:900">
+          <td></td><td style="padding:10px;color:#166534">Books total (${books.length})  ·  Admission ${promoInr(adm)}</td>
+          <td style="padding:10px;text-align:right;color:#166534">${promoInr(bTotal)}</td><td></td></tr>
+          <tr style="background:#dcfce7;font-weight:900"><td></td><td style="padding:10px;color:#14532d">Total to pay for ${esc(cls)} (admission + all books)</td>
+          <td style="padding:10px;text-align:right;color:#14532d;font-size:15px">${promoInr(adm+bTotal)}</td><td></td></tr></tfoot>
       </table>
     </div>
-
-    <!-- Duplicate roll warning -->
-    <div id="rollDupWarning" style="display:none;background:#fff1f2;border:1.5px solid #fca5a5;border-radius:10px;
-      padding:10px 14px;margin-top:10px;font-size:12px;color:#b91c1c;font-weight:700">
-      <i class="fas fa-exclamation-triangle"></i>
-      <span id="rollDupMsg">Duplicate roll numbers detected — please fix before promoting.</span>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">
+      <span style="font-size:12px;color:#6b7a99;font-weight:700">Copy book list from:</span>
+      <select id="psCopyFrom" class="form-control" style="width:auto;min-width:160px">${classes.filter(c=>c!==cls).map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select>
+      <button class="btn btn-outline btn-sm" onclick="promoSetupCopy()"><i class="fas fa-copy"></i> Copy</button>
     </div>
+  </div>
+  <div class="card" style="padding:18px">
+    <div style="font-size:13px;font-weight:900;color:#0d1f3c;margin-bottom:10px"><i class="fas fa-table" style="color:#c9a84c"></i> All classes at a glance <span style="font-weight:600;color:#9aa8c0;font-size:11px">(click a row to edit it)</span></div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:#f8faff;color:#6b7a99;font-size:10px;text-transform:uppercase"><th style="padding:8px 10px;text-align:left">Class</th><th style="padding:8px 10px;text-align:right">Admission</th><th style="padding:8px 10px">Books</th><th style="padding:8px 10px;text-align:right">Books total</th><th style="padding:8px 10px;text-align:right">Full total</th></tr></thead>
+      <tbody>${overview}</tbody></table></div>
+  </div>`;
+}
+function promoSetupRefresh(){ const el=document.getElementById('promoSetupBody'); if(el) el.innerHTML=promoSetupInner(); }
+function promoSetupSelect(v){ window._promoSetupClass=v; promoSetupRefresh(); }
+function promoSetupSaveAdm(v){ setClassAdmissionFee(window._promoSetupClass,Math.max(0,parseFloat(v)||0)); toast('Admission fee saved'); promoSetupRefresh(); }
+function promoSetupEditBook(id,field,v){
+  const cls=window._promoSetupClass;
+  setPromoBooks(cls,getPromoBooks(cls).map(b=>b.id===id?{...b,[field]:field==='price'?Math.max(0,parseFloat(v)||0):String(v).trim()}:b));
+  promoSetupRefresh();
+}
+function promoSetupAddBook(){
+  const cls=window._promoSetupClass;
+  const name=(document.getElementById('psNewName')?.value||'').trim();
+  const price=Math.max(0,parseFloat(document.getElementById('psNewPrice')?.value)||0);
+  if(!name){ toast('Enter the book / item name','error'); return; }
+  setPromoBooks(cls,[...getPromoBooks(cls),{id:uid(),name,price}]);
+  promoSetupRefresh();
+  setTimeout(()=>document.getElementById('psNewName')?.focus(),30);
+}
+function promoSetupDelBook(id){
+  if(!confirm('Remove this book from the list?')) return;
+  const cls=window._promoSetupClass;
+  setPromoBooks(cls,getPromoBooks(cls).filter(b=>b.id!==id));
+  promoSetupRefresh();
+}
+function promoSetupCopy(){
+  const cls=window._promoSetupClass, src=document.getElementById('psCopyFrom')?.value;
+  if(!src||src===cls) return;
+  const sb=getPromoBooks(src);
+  if(!sb.length){ toast(`${src} has no books set`,'error'); return; }
+  if(getPromoBooks(cls).length && !confirm(`Replace the book list of ${cls} with the list from ${src}?`)) return;
+  setPromoBooks(cls,sb.map(b=>({id:uid(),name:b.name,price:b.price})));
+  toast('Book list copied'); promoSetupRefresh();
+}
 
-    <!-- Action buttons -->
-    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;align-items:center">
-      <button onclick="executePromotion()"
-        style="padding:11px 24px;background:linear-gradient(135deg,#1a3a6b,#3b82f6);color:white;border:none;
-        border-radius:10px;font-weight:900;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;
-        box-shadow:0 4px 14px rgba(26,58,107,.3)">
-        <i class="fas fa-graduation-cap"></i> Promote Selected Students
-      </button>
-      <button onclick="document.querySelectorAll('.promChk').forEach(c=>{
-          const sid=c.value;const sdata=(ls('students')||[]).find(x=>x.id===sid);if(!sdata)return;
-          const sf=(ls('fees')||{})[sid]||{};
-          const admPaid=sf.admissionPaid||0;
-          const admTotal=getEffectiveFee(sid,'admission',sdata.class);
-          const mPaid=Object.values(sf.monthly||{}).filter(x=>x.paid).length;
-          const mDue=Math.max(0,(currMonth()+1)-mPaid);
-          c.checked=!(admPaid<admTotal||mDue>0);
-        })"
-        style="padding:9px 18px;background:#fff7ed;color:#d97706;border:1.5px solid #fdba74;border-radius:10px;font-weight:800;font-size:12px;cursor:pointer">
-        <i class="fas fa-filter"></i> Select Fee-Clear Only
-      </button>
-      <div style="flex:1"></div>
-      <div style="font-size:11px;color:#9aa8c0">
-        <i class="fas fa-lightbulb" style="color:#f59e0b"></i>
-        Blank roll field = keep old roll number
+// ═══════════════════════════════════════════════════════════════════════════
+//  PROMOTE STUDENTS TAB
+// ═══════════════════════════════════════════════════════════════════════════
+function promoFromChanged(){ const t=document.getElementById('promTo'); if(t) delete t.dataset.manualSet; loadPromotionStudents(); }
+function promoToChanged(){
+  const t=document.getElementById('promTo'); if(t) t.dataset.manualSet='1';
+  const def=t?.value;
+  PROMO.list.forEach(s=>{ const r=PROMO.rows[s.id]; if(s.class===PROMO.fromClass&&!r.ov) r.to=def; });
+  renderPromoList();
+}
+function promoFullYearToggle(v){ _promoFullYear=!!v; renderPromoList(); }
+
+function promoAllSessions(){
+  const a=new Set((ls('sessions')||[]).map(String));
+  (ls('students')||[]).forEach(s=>{ if(s.session) a.add(String(s.session)); });
+  a.add(String(getActiveSession()));
+  return [...a].sort();
+}
+function promoFromSessionChanged(){
+  const fs=document.getElementById('promFromSession')?.value;
+  const sel=document.getElementById('promToSession');
+  if(sel&&fs){
+    const nxt=String(parseInt(fs)+1);
+    const opts=new Set(promoAllSessions().filter(x=>parseInt(x)>parseInt(fs))); opts.add(nxt);
+    sel.innerHTML=[...opts].sort().map(x=>`<option value="${x}">${x}</option>`).join('');
+    sel.value=nxt;
+  }
+  loadPromotionStudents();
+}
+function promoSearchChanged(v){ if(!PROMO.toSession){ loadPromotionStudents(); return; } PROMO.q=String(v||''); renderPromoList(); }
+function promoSearchClear(){ const i=document.getElementById('promSearch'); if(i) i.value=''; if(!PROMO.toSession){ loadPromotionStudents(); return; } PROMO.q=''; renderPromoList(); }
+function promoMatch(s,q){
+  q=String(q||'').trim().toLowerCase(); if(!q) return true;
+  return q.split(/\s+/).every(w=>[s.name,s.roll,s.studentId,s.fatherName,s.motherName,s.phone,s.class]
+    .some(f=>String(f==null?'':f).toLowerCase().includes(w)));
+}
+const PROMO_MAX_ROWS=60;
+function promoMatchesAll(){
+  const q=(PROMO.q||'').trim();
+  return PROMO.list.filter(s=>q?promoMatch(s,q):(!PROMO.fromClass||s.class===PROMO.fromClass));
+}
+function promoVisible(){ return promoMatchesAll().slice(0,PROMO_MAX_ROWS); }
+
+function loadPromotionStudents(){
+  const fromClass=document.getElementById('promFrom')?.value||'';
+  const toSession=document.getElementById('promToSession')?.value;
+  const session=document.getElementById('promFromSession')?.value||getActiveSession();
+  const toSel=document.getElementById('promTo');
+  if(fromClass&&toSel&&!toSel.dataset.manualSet){ const n=promoNextClass(fromClass); if(n) toSel.value=n; }
+  const order=getAllClasses();
+  // every student of the chosen year (so search can find anyone); the class filter only applies while the search box is empty
+  const list=(ls('students')||[]).filter(s=>String(s.session)===String(session))
+    .sort((a,b)=>(order.indexOf(a.class)-order.indexOf(b.class))||(a.roll-b.roll));
+  PROMO={fromClass,toSession,session:String(session),list,rows:{},q:document.getElementById('promSearch')?.value||''};
+  list.forEach(s=>{
+    PROMO.rows[s.id]={to:(s.class===fromClass&&toSel?.value)?toSel.value:(promoNextClass(s.class)||s.class),ov:false,roll:'',chk:false,init:false};
+  });
+  renderPromoList();
+}
+
+function renderPromoList(){
+  const box=document.getElementById('promotionList'); if(!box) return;
+  const {fromClass,toSession,session}=PROMO;
+  const matches=promoMatchesAll(), list=matches.slice(0,PROMO_MAX_ROWS);
+  const searching=!!(PROMO.q||'').trim();
+  if(!list.length){
+    box.innerHTML=`<div style="background:white;border-radius:12px;padding:30px;text-align:center;color:#aab"><i class="fas fa-users" style="font-size:32px;margin-bottom:10px;display:block"></i>${searching?`No student matches "<b>${esc(PROMO.q)}</b>" in session <b>${session}</b>`:`No students in <b>${esc(fromClass)}</b> for session <b>${session}</b>`}</div>`;
+    promoCheckDups();
+    return;
+  }
+  const classes=getAllClasses();
+  const infos={};
+  list.forEach(s=>{ const r=PROMO.rows[s.id]; infos[s.id]=promoRowInfo(s); if(!r.init){ r.init=true; r.chk=infos[s.id].ready; } if(!infos[s.id].ready) r.chk=false; });
+  const readyN=list.filter(s=>infos[s.id].ready).length, blockedN=list.length-readyN;
+  const defTo=document.getElementById('promTo')?.value||fromClass;
+  const th='padding:11px 12px;color:rgba(255,255,255,.75);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px';
+  const btn='padding:7px 14px;border-radius:8px;font-weight:800;font-size:12px;cursor:pointer';
+
+  const rowsHtml=list.map((s,i)=>{
+    const r=PROMO.rows[s.id], inf=infos[s.id], p=inf.prev, t=inf.ch;
+    const sp=promoSpecialLabel(s.class,r.to);
+    const bg=sp?'#fffbeb':(i%2===0?'white':'#fafcff');
+    const prevCell=p.total>0
+      ? `<div style="font-weight:900;color:#dc2626">${promoInr(p.total)}</div>
+         <div style="font-size:10px;color:#9a3412;line-height:1.35">${p.admDue>0?'Admission '+promoInr(p.admDue)+'<br>':''}${p.monthlyDue>0?'Monthly '+p.monthN+' mo · '+promoInr(p.monthlyDue)+'<br>':''}${p.examDue>0?'Exam '+promoInr(p.examDue):''}</div>
+         <button onclick="promoCollectPrev('${s.id}')" style="margin-top:4px;padding:3px 9px;background:#dc2626;color:white;border:none;border-radius:6px;font-size:11px;font-weight:800;cursor:pointer"><i class="fas fa-rupee-sign"></i> Collect</button>`
+      : `<span style="background:#f0fdf4;color:#15803d;padding:3px 10px;border-radius:8px;font-size:11px;font-weight:800">✓ Clear</span>`;
+    const chCell=!inf.plan
+      ? `<button onclick="openPromoCharges('${s.id}')" style="padding:6px 11px;background:#fffbeb;color:#92400e;border:1.5px solid #c9a84c;border-radius:8px;font-size:11px;font-weight:800;cursor:pointer"><i class="fas fa-plus-circle"></i> Set Admission &amp; Books</button>`
+      : `<div style="font-size:11px;color:#475569">Total <b>${promoInr(t.grand)}</b> · Paid <b>${promoInr(t.paid)}</b></div>
+         <div style="margin:2px 0">${t.due>0?`<span style="background:#fff1f2;color:#dc2626;padding:2px 9px;border-radius:8px;font-size:11px;font-weight:900">Due ${promoInr(t.due)}</span>`:`<span style="background:#f0fdf4;color:#15803d;padding:2px 9px;border-radius:8px;font-size:11px;font-weight:900">✓ Paid</span>`}</div>
+         <div style="font-size:10px;color:#6b7a99">Adm ${promoInr(t.admTotal)} + ${t.booksCount}/${t.booksAll} books ${promoInr(t.booksTotal)}</div>
+         <button onclick="openPromoCharges('${s.id}')" style="margin-top:4px;padding:3px 9px;background:#1a3a6b;color:white;border:none;border-radius:6px;font-size:11px;font-weight:800;cursor:pointer">${t.due>0?'Edit / Pay':'Edit'}</button>`;
+    const stCell=inf.ready
+      ? `<span style="background:#f0fdf4;color:#15803d;padding:3px 10px;border-radius:8px;font-size:11px;font-weight:900">✅ Ready</span>`
+      : `<span style="background:#fff1f2;color:#b91c1c;padding:3px 10px;border-radius:8px;font-size:11px;font-weight:900">⛔ Blocked</span><div style="font-size:10px;color:#9a3412;margin-top:3px;line-height:1.35">${inf.reasons.map(esc).join('<br>')}</div>`;
+    return `<tr style="border-bottom:1px solid #f0f4ff;background:${bg}">
+      <td style="padding:10px 12px;text-align:center"><input type="checkbox" ${r.chk?'checked':''} ${inf.ready?'':'disabled'} onchange="promoSetChk('${s.id}',this.checked)" style="width:16px;height:16px;cursor:${inf.ready?'pointer':'not-allowed'};accent-color:#1a3a6b"></td>
+      <td style="padding:10px 12px"><div style="font-weight:800;color:#1a3a6b;font-size:13px">${esc(s.name)}</div><div style="font-size:10px;color:#9aa8c0">${esc(s.class)} · ${s.studentId||''}${s.fatherName?' · F: '+esc(s.fatherName):''}</div></td>
+      <td style="padding:10px 12px;text-align:center"><span style="background:#f1f5f9;color:#475569;padding:4px 11px;border-radius:8px;font-size:13px;font-weight:800">${s.roll}</span></td>
+      <td style="padding:10px 12px;text-align:center;background:rgba(201,168,76,.06)">
+        <input type="number" class="newRollInput" data-id="${s.id}" placeholder="${s.roll}" min="1" max="999" value="${r.roll}" oninput="promoSetRoll('${s.id}',this.value)"
+          style="width:70px;padding:6px 8px;border:2px solid #c9a84c;border-radius:8px;font-size:13px;font-weight:900;text-align:center;color:#1a3a6b;font-family:inherit;outline:none;background:#fffbeb"></td>
+      <td style="padding:10px 12px">
+        <select onchange="promoRowTo('${s.id}',this.value)" style="width:100%;min-width:130px;padding:6px 8px;border:2px solid ${sp?'#f59e0b':'#e2e8f0'};border-radius:8px;font-family:inherit;font-size:12px;font-weight:700;color:#1a3a6b">
+          ${classes.map(c=>`<option value="${esc(c)}" ${c===r.to?'selected':''}>${esc(c)}</option>`).join('')}</select>
+        ${sp?`<div style="font-size:10px;font-weight:800;color:#b45309;margin-top:3px">${sp}</div>`:''}</td>
+      <td style="padding:10px 12px;text-align:center">${prevCell}</td>
+      <td style="padding:10px 12px;text-align:center">${chCell}</td>
+      <td style="padding:10px 12px;text-align:center">${stCell}</td></tr>`;
+  }).join('');
+
+  box.innerHTML=`
+  <div class="card" style="padding:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+      <div>
+        <div style="font-size:15px;font-weight:900;color:#0d1f3c"><i class="fas fa-arrow-right" style="color:#c9a84c"></i>
+          Promoting: <span style="color:#1a3a6b">${searching?'Search results':esc(fromClass)}</span> → <span style="color:#0d9488">${searching?'next class of each student':esc(defTo)}</span>
+          <span style="font-size:11px;font-weight:700;color:#6b7a99">(default — change any student's class in the "Promote To" column)</span>
+          &nbsp;|&nbsp; Session <span style="background:#1a3a6b;color:white;padding:2px 10px;border-radius:8px;font-size:12px">${toSession}</span></div>
+        <div style="font-size:12px;color:#6b7a99;margin-top:4px">${matches.length>list.length?`Showing first <b>${list.length}</b> of ${matches.length} matches — type more to narrow`:`<b>${list.length}</b>`} student${list.length!==1?'s':''} (session ${session})${searching?' · search across all classes':''} ·
+          <b style="color:#15803d">${readyN} ready</b> · <b style="color:#dc2626">${blockedN} blocked</b>
+          — a student is <i>ready</i> only when <b>${session} dues are clear</b> and <b>${toSession} admission fee + books are fully paid</b>.</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="promoDefaultCharges()" style="${btn};background:#fffbeb;color:#92400e;border:1.5px solid #c9a84c"><i class="fas fa-bolt"></i> Set default charges for all</button>
+        <button onclick="autoFillRolls()" style="${btn};background:#f0f4ff;color:#1a3a6b;border:1.5px solid #c7d7f4"><i class="fas fa-magic"></i> Auto-fill Rolls</button>
+        <button onclick="copyOldRolls()" style="${btn};background:#f0fdf4;color:#15803d;border:1.5px solid #86efac"><i class="fas fa-copy"></i> Keep Same Rolls</button>
+        <button onclick="renderPromoList()" style="${btn};background:#eff6ff;color:#1d4ed8;border:1.5px solid #bfdbfe"><i class="fas fa-sync"></i> Refresh dues</button>
       </div>
     </div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#475569;margin-bottom:12px;cursor:pointer">
+      <input type="checkbox" ${_promoFullYear?'checked':''} onchange="promoFullYearToggle(this.checked)" style="width:15px;height:15px">
+      Require all 12 months of ${session} to be paid <span style="color:#9aa8c0">(otherwise only months up to today count; a session that has already ended always counts all 12)</span></label>
+    <div style="overflow-x:auto;border-radius:10px;border:1.5px solid #e2e8f0">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="background:linear-gradient(135deg,#0d1f3c,#1a3a6b)">
+          <th style="${th};width:40px;text-align:center"><input type="checkbox" onchange="promoToggleAll(this.checked)" title="Select all ready students" style="width:16px;height:16px;cursor:pointer;accent-color:#f0c040"></th>
+          <th style="${th};text-align:left">Student</th>
+          <th style="${th};text-align:center">Old Roll<br><span style="font-size:9px;opacity:.6">(${session})</span></th>
+          <th style="${th};text-align:center;color:#f0c040;background:rgba(201,168,76,.15)">✏️ New Roll<br><span style="font-size:9px;opacity:.8">(${toSession})</span></th>
+          <th style="${th};text-align:left">Promote To</th>
+          <th style="${th};text-align:center">${session} Previous Dues</th>
+          <th style="${th};text-align:center">${toSession} Admission + Books</th>
+          <th style="${th};text-align:center">Status</th></tr></thead>
+        <tbody>${rowsHtml}</tbody></table>
+    </div>
+    <div id="rollDupWarning" style="display:none;background:#fff1f2;border:1.5px solid #fca5a5;border-radius:10px;padding:10px 14px;margin-top:10px;font-size:12px;color:#b91c1c;font-weight:700">
+      <i class="fas fa-exclamation-triangle"></i> <span id="rollDupMsg"></span></div>
+    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;align-items:center">
+      <button onclick="executePromotion()" style="padding:11px 24px;background:linear-gradient(135deg,#1a3a6b,#3b82f6);color:white;border:none;border-radius:10px;font-weight:900;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;box-shadow:0 4px 14px rgba(26,58,107,.3)">
+        <i class="fas fa-graduation-cap"></i> Promote Selected Students (<span id="promSelCount">0</span>)</button>
+      <button onclick="promoSelectReady()" style="${btn};background:#f0fdf4;color:#15803d;border:1.5px solid #86efac"><i class="fas fa-check-double"></i> Select Ready Only</button>
+      <div style="flex:1"></div>
+      <div style="font-size:11px;color:#9aa8c0"><i class="fas fa-lightbulb" style="color:#f59e0b"></i> Blank roll field = keep old roll · Blocked students cannot be ticked until everything is paid</div>
+    </div>
   </div>`;
+  promoCheckDups();
+}
+
+function promoSetChk(id,v){ if(PROMO.rows[id]) PROMO.rows[id].chk=!!v; promoCheckDups(); }
+function promoSetRoll(id,v){ if(PROMO.rows[id]) PROMO.rows[id].roll=v.trim(); promoCheckDups(); }
+function promoRowTo(id,v){
+  const r=PROMO.rows[id]; if(!r) return;
+  r.to=v; r.ov=(v!==(document.getElementById('promTo')?.value));
+  renderPromoList();
+}
+function promoToggleAll(v){ promoVisible().forEach(s=>{ PROMO.rows[s.id].chk=v&&promoRowInfo(s).ready; }); renderPromoList(); }
+function promoSelectReady(){ promoVisible().forEach(s=>{ PROMO.rows[s.id].chk=promoRowInfo(s).ready; }); renderPromoList(); }
+function promoCollectPrev(id){ openCollectFee(id); toast('After collecting, press "Refresh dues" on the Promote tab','info'); }
+
+function promoDefaultCharges(){
+  let n=0;
+  promoVisible().forEach(s=>{
+    const r=PROMO.rows[s.id];
+    if(!promoPlanFor(s.id,r.to,PROMO.toSession)){ promoSavePlan(promoBuildPlan(s,r.to,PROMO.toSession)); n++; }
+  });
+  toast(n?`Default admission + all books set for ${n} student${n!==1?'s':''} — now collect the payments`:'Every student already has charges set');
+  promoVisible().forEach(s=>{ PROMO.rows[s.id].chk=promoRowInfo(s).ready; });
+  renderPromoList();
 }
 
 function autoFillRolls(){
-  const inputs = [...document.querySelectorAll('.newRollInput')];
-  inputs.forEach((inp,i) => { inp.value = i+1; });
-  highlightRollDups();
+  const cnt={};
+  promoVisible().forEach(s=>{ const r=PROMO.rows[s.id]; cnt[r.to]=(cnt[r.to]||0)+1; r.roll=String(cnt[r.to]); });
+  renderPromoList();
 }
+function copyOldRolls(){ promoVisible().forEach(s=>{ PROMO.rows[s.id].roll=String(s.roll); }); renderPromoList(); }
 
-function copyOldRolls(){
+// Duplicate rolls are judged per TARGET class (new roll if typed, else old roll),
+// including students who already exist in that class in the target session.
+function promoFindDups(){
+  const all=ls('students')||[];
+  const keyCount={}, keyOf={};
+  const add=(k)=>{ keyCount[k]=(keyCount[k]||0)+1; };
+  all.filter(s=>s.session===PROMO.toSession&&!PROMO.rows[s.id]).forEach(s=>add(s.class+'|'+s.roll));
+  PROMO.list.forEach(s=>{
+    const r=PROMO.rows[s.id]; if(!r.chk) return;
+    const k=r.to+'|'+(r.roll!==''?r.roll:s.roll); keyOf[s.id]=k; add(k);
+  });
+  const dupKeys=Object.keys(keyCount).filter(k=>keyCount[k]>1);
+  return { dupKeys, keyOf };
+}
+function promoCheckDups(){
+  if(!PROMO.list.length) return;
+  const {dupKeys,keyOf}=promoFindDups();
   document.querySelectorAll('.newRollInput').forEach(inp=>{
-    inp.value = inp.placeholder; // placeholder is the old roll number
+    const bad=keyOf[inp.dataset.id]&&dupKeys.includes(keyOf[inp.dataset.id]);
+    inp.style.borderColor=bad?'#dc2626':'#c9a84c';
+    inp.style.background=bad?'#fff1f2':'#fffbeb';
   });
-  highlightRollDups();
-}
-
-function highlightRollDups(){
-  const inputs = [...document.querySelectorAll('.newRollInput')];
-  const vals   = inputs.map(i=>i.value.trim()).filter(v=>v!=='');
-  const dups   = vals.filter((v,i)=>vals.indexOf(v)!==i);
-  let hasDup   = false;
-  inputs.forEach(inp=>{
-    if(inp.value.trim()!==''&&dups.includes(inp.value.trim())){
-      inp.style.borderColor='#dc2626';
-      inp.style.background='#fff1f2';
-      hasDup=true;
-    } else {
-      inp.style.borderColor=inp===document.activeElement?'#1a3a6b':'#c9a84c';
-      inp.style.background='#fffbeb';
-    }
-  });
-  const warn = document.getElementById('rollDupWarning');
+  const warn=document.getElementById('rollDupWarning');
   if(warn){
-    warn.style.display = hasDup?'block':'none';
-    const msg = document.getElementById('rollDupMsg');
-    if(msg) msg.textContent = hasDup
-      ? `Duplicate roll numbers detected (${[...new Set(dups)].join(', ')}) — please fix before promoting.`
-      : '';
+    warn.style.display=dupKeys.length?'block':'none';
+    const msg=document.getElementById('rollDupMsg');
+    if(msg) msg.textContent=dupKeys.length?`Duplicate roll numbers: ${dupKeys.map(k=>{const [c,rl]=k.split('|');return c+' – roll '+rl;}).join(', ')} — please fix before promoting.`:'';
   }
+  const c=document.getElementById('promSelCount');
+  if(c) c.textContent=PROMO.list.filter(s=>PROMO.rows[s.id].chk).length;
 }
 
-function toggleAllProm(chk){ document.querySelectorAll('.promChk').forEach(c=>c.checked=chk.checked); }
-
-function executePromotion(){
-  // Check for duplicate rolls
-  const rollInputs = [...document.querySelectorAll('.newRollInput')];
-  const filledVals = rollInputs.map(i=>i.value.trim()).filter(v=>v!=='');
-  const dups = filledVals.filter((v,i)=>filledVals.indexOf(v)!==i);
-  if(dups.length>0){
-    toast(`Fix duplicate roll numbers (${[...new Set(dups)].join(', ')}) before promoting`,'error');
-    return;
+// ── per-student Admission + Books dialog ───────────────────────────────────
+function openPromoCharges(id){
+  const s=(ls('students')||[]).find(x=>x.id===id); if(!s){ toast('Student not found','error'); return; }
+  const st=PROMO.rows[id]; if(!st) return;
+  const toClass=st.to, toSession=PROMO.toSession;
+  let plan=promoPlanFor(id,toClass,toSession);
+  const wasNew=!plan;
+  if(!plan) plan=promoBuildPlan(s,toClass,toSession);
+  plan=JSON.parse(JSON.stringify(plan));
+  _promoModal={id,plan,toClass,toSession,toClassSnapshot:toClass};
+  const prev=promoPrevDues(s), t=promoPlanTotals(plan), sp=promoSpecialLabel(s.class,toClass);
+  const inp='padding:7px 9px;border:2px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;font-weight:700;color:#1a3a6b;outline:none';
+  const body=`
+  <div style="background:#f0f4ff;border-radius:10px;padding:10px 14px;margin-bottom:12px">
+    <div style="font-weight:900;color:#1a3a6b">${esc(s.name)} <span style="font-weight:600;color:#6b7a99">· Roll ${s.roll}</span></div>
+    <div style="font-size:12px;color:#475569">${esc(s.class)} (${PROMO.session}) → <b style="color:#0d9488">${esc(toClass)}</b> (${toSession}) ${sp?`<span style="color:#b45309;font-weight:800">· ${sp}</span>`:''}</div>
+  </div>
+  ${prev.total>0?`<div style="background:#fff1f2;border:1.5px solid #fca5a5;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#b91c1c">
+      <b>⚠️ ${PROMO.session} dues pending: ${promoInr(prev.total)}</b> — Admission ${promoInr(prev.admDue)} · Monthly ${prev.monthN} mo ${promoInr(prev.monthlyDue)} · Exam ${promoInr(prev.examDue)}<br>
+      This student cannot be promoted until these are cleared.
+      <button class="btn btn-sm" style="margin-left:8px;background:#dc2626;color:white;border:none" onclick="closeModal();openCollectFee('${id}')">Collect previous dues</button></div>`
+    :`<div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;padding:8px 14px;margin-bottom:12px;font-size:12px;color:#15803d;font-weight:800">✓ ${PROMO.session} dues are clear</div>`}
+  ${wasNew&&t.paid>0?`<div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:10px;padding:8px 14px;margin-bottom:12px;font-size:12px;color:#92400e">${promoInr(t.paid)} was already collected earlier for this student — it is kept and counted below.</div>`:''}
+  <div style="font-size:12px;font-weight:900;color:#0d1f3c;margin-bottom:6px">1. Admission fee for ${esc(toClass)} — ${toSession}</div>
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+    <input type="number" min="0" id="pmAdm" value="${plan.admTotal}" oninput="promoModalRecalc()" style="${inp};width:140px">
+    <span style="font-size:11px;color:#9aa8c0">Class default ${promoInr(getClassAdmissionFee(toClass))} — change for this student only if needed (0 = waived)</span></div>
+  <div style="font-size:12px;font-weight:900;color:#0d1f3c;margin-bottom:6px">2. Books &amp; items <span style="font-weight:600;color:#9aa8c0">— untick anything this student does not want</span></div>
+  ${plan.books.length?`<div style="border:1.5px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:14px">
+    ${plan.books.map((b,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid #f0f4ff">
+      <input type="checkbox" id="pmTake_${i}" ${b.take!==false?'checked':''} onchange="promoModalRecalc()" style="width:17px;height:17px;accent-color:#1a3a6b;cursor:pointer">
+      <label for="pmTake_${i}" id="pmName_${i}" style="flex:1;font-size:13px;font-weight:700;color:#1a3a6b;cursor:pointer">${esc(b.name)}</label>
+      <input type="number" min="0" id="pmPrice_${i}" value="${b.price}" oninput="promoModalRecalc()" style="${inp};width:100px;text-align:right"></div>`).join('')}</div>`
+    :`<div style="border:1.5px dashed #cbd5e1;border-radius:10px;padding:14px;text-align:center;color:#9aa8c0;font-size:12px;margin-bottom:14px">No books set for ${esc(toClass)}. Add them in the <b>Admission &amp; Books Setup</b> tab.</div>`}
+  <div style="background:#f8faff;border:1.5px solid #e2e8f0;border-radius:10px;padding:12px 14px;font-size:13px">
+    <div style="display:flex;justify-content:space-between"><span>Admission</span><b id="pmTAdm">${promoInr(t.admTotal)}</b></div>
+    <div style="display:flex;justify-content:space-between"><span>Books (<span id="pmTCnt">${t.booksCount}</span>)</span><b id="pmTBooks">${promoInr(t.booksTotal)}</b></div>
+    <div style="display:flex;justify-content:space-between;border-top:1px dashed #cbd5e1;margin-top:5px;padding-top:5px;font-size:14px"><b>Total payable</b><b id="pmTGrand" style="color:#1a3a6b">${promoInr(t.grand)}</b></div>
+    <div style="display:flex;justify-content:space-between;color:#15803d"><span>Already paid</span><b id="pmTPaid">${promoInr(t.paid)}</b></div>
+    <div style="display:flex;justify-content:space-between;color:#dc2626;font-size:14px"><b>Balance</b><b id="pmTDue">${promoInr(t.due)}</b></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
+    <div class="form-group" style="margin:0"><label>Collect now (₹)</label><input type="number" min="0" id="pmPay" value="${t.due}" oninput="this.dataset.touched='1'" style="${inp};width:100%"></div>
+    <div class="form-group" style="margin:0"><label>Payment Mode</label><select id="pmMode" class="form-control"><option>Cash</option><option>UPI</option><option>Cheque</option><option>Bank Transfer</option></select></div>
+  </div>`;
+  openModal(`Admission & Books — ${s.name}`,body,[
+    {label:'<i class="fas fa-hand-holding-usd"></i> Save & Collect',cls:'btn-success',onclick:'promoModalSave(true)'},
+    {label:'<i class="fas fa-save"></i> Save Charges Only',cls:'btn-primary',onclick:'promoModalSave(false)'},
+    {label:'Cancel',cls:'btn-outline',onclick:'closeModal()'}
+  ]);
+  promoModalRecalc();
+}
+function promoModalRead(){
+  const m=_promoModal;
+  const admTotal=Math.max(0,parseFloat(document.getElementById('pmAdm')?.value)||0);
+  const books=m.plan.books.map((b,i)=>({id:b.id,name:b.name,
+    price:Math.max(0,parseFloat(document.getElementById('pmPrice_'+i)?.value)||0),
+    take:!!document.getElementById('pmTake_'+i)?.checked}));
+  return {admTotal,books};
+}
+function promoModalRecalc(){
+  const m=_promoModal; if(!m) return;
+  const {admTotal,books}=promoModalRead();
+  const t=promoPlanTotals({...m.plan,admTotal,books});
+  const set=(id,v)=>{ const e=document.getElementById(id); if(e) e.textContent=v; };
+  set('pmTAdm',promoInr(t.admTotal)); set('pmTBooks',promoInr(t.booksTotal)); set('pmTCnt',t.booksCount);
+  set('pmTGrand',promoInr(t.grand)); set('pmTPaid',promoInr(t.paid)); set('pmTDue',promoInr(t.due));
+  books.forEach((b,i)=>{ const n=document.getElementById('pmName_'+i); if(n){ n.style.opacity=b.take?1:.4; n.style.textDecoration=b.take?'none':'line-through'; } });
+  const pay=document.getElementById('pmPay'); if(pay&&!pay.dataset.touched) pay.value=t.due;
+}
+function promoModalSave(collect){
+  const m=_promoModal; if(!m) return;
+  const s=(ls('students')||[]).find(x=>x.id===m.id); if(!s) return;
+  const {admTotal,books}=promoModalRead();
+  const plan={...m.plan,admTotal,books};
+  let payAmt=0, mode=document.getElementById('pmMode')?.value||'Cash';
+  if(collect){
+    payAmt=Math.round((parseFloat(document.getElementById('pmPay')?.value)||0)*100)/100;
+    if(payAmt<=0){ toast('Enter the amount to collect','error'); return; }
   }
+  if(payAmt>0){
+    plan.paid=Math.round(((parseFloat(plan.paid)||0)+payAmt)*100)/100;
+    plan.payments=[...(plan.payments||[]),{date:today(),amount:payAmt,mode,receiptId:null}];
+  }
+  promoSavePlan(plan);
+  let rId=null;
+  if(payAmt>0){
+    const t=promoPlanTotals(plan);
+    rId=saveReceiptV5(m.id,'Admission & Books',payAmt,mode,`Admission & Books for ${m.toClass} (${m.toSession})`,[],t.due);
+    const rc=ls('receipts')||[]; const ri=rc.findIndex(x=>x.id===rId);
+    if(ri>=0&&rc[ri].student){ rc[ri].student={...rc[ri].student,class:m.toClass,session:m.toSession}; ss('receipts',rc); }
+    plan.payments[plan.payments.length-1].receiptId=rId; promoSavePlan(plan);
+  }
+  closeModal();
+  const row=PROMO.rows[m.id]; if(row) row.chk=promoRowInfo(s).ready;
+  renderPromoList();
+  toast(payAmt>0?`Collected ${promoInr(payAmt)} — receipt printing`:'Charges saved');
+  if(rId) printReceiptV5(rId);
+}
 
-  const selected   = [...document.querySelectorAll('.promChk:checked')].map(c=>c.value);
-  if(!selected.length){toast('Select at least one student','error');return;}
-  const toClass    = document.getElementById('promTo')?.value;
-  const toSession  = document.getElementById('promToSession')?.value;
-  const fromClass  = document.getElementById('promFrom')?.value;
-  const fromSession= getActiveSession();
-  if(!toClass||!toSession){toast('Select destination class and session','error');return;}
+// ── final step: move the students ──────────────────────────────────────────
+function executePromotion(){
+  const {fromClass,toSession,session,list}=PROMO;
+  if(!list.length){ toast('Load students first','error'); return; }
+  if(parseInt(toSession)<=parseInt(session)){ toast(`Target session must be after the current session (${session})`,'error'); return; }
+  const selected=list.filter(s=>PROMO.rows[s.id].chk);
+  if(!selected.length){ toast('Select at least one student','error'); return; }
 
-  // Build roll number map from inputs
-  const rollMap = {};
-  rollInputs.forEach(inp=>{
-    const sid = inp.dataset.id;
-    const val = inp.value.trim();
-    if(val!=='') rollMap[sid] = parseInt(val)||val;
-  });
+  // Re-check the money rules right now (data may have changed since the list was drawn)
+  const blocked=selected.filter(s=>!promoRowInfo(s).ready);
+  if(blocked.length){
+    toast(`${blocked.length} selected student${blocked.length!==1?'s have':' has'} pending dues / unpaid admission & books: ${blocked.slice(0,3).map(s=>s.name).join(', ')}${blocked.length>3?'…':''}`,'error');
+    renderPromoList(); return;
+  }
+  const {dupKeys}=promoFindDups();
+  if(dupKeys.length){ toast('Fix duplicate roll numbers before promoting','error'); promoCheckDups(); return; }
 
-  // Count how many have new rolls assigned
-  const withNewRoll   = selected.filter(id=>rollMap[id]!==undefined).length;
-  const withOldRoll   = selected.length - withNewRoll;
-
+  const special=selected.filter(s=>promoSpecialLabel(s.class,PROMO.rows[s.id].to));
+  const byClass={}; selected.forEach(s=>{ const to=PROMO.rows[s.id].to; byClass[to]=(byClass[to]||0)+1; });
+  const collected=selected.reduce((a,s)=>a+promoPlanTotals(promoPlanFor(s.id,PROMO.rows[s.id].to,toSession)).paid,0);
   if(!confirm(
-    `Promote ${selected.length} student${selected.length!==1?'s':''}\n` +
-    `From: ${fromClass} (${fromSession}) → ${toClass} (${toSession})\n\n` +
-    `${withNewRoll} student${withNewRoll!==1?'s':''} will get new roll numbers\n` +
-    `${withOldRoll} student${withOldRoll!==1?'s':''} will keep their existing roll numbers\n\n` +
-    `Fee history from ${fromSession} will be preserved.\nContinue?`
-  )) return;
+    `Promote ${selected.length} student${selected.length!==1?'s':''}\n`+
+    `From: ${fromClass||'selected students'} (${session}) → session ${toSession}\n\n`+
+    Object.entries(byClass).map(([c,n])=>`  ${c}: ${n}`).join('\n')+
+    (special.length?`\n\nSpecial cases (${special.length}):\n`+special.map(s=>`  ${s.name} → ${PROMO.rows[s.id].to} (${promoSpecialLabel(s.class,PROMO.rows[s.id].to).replace(/^\S+\s/,'')})`).join('\n'):'')+
+    (()=>{ const vis=new Set(promoVisible().map(x=>x.id)); const h=selected.filter(s=>!vis.has(s.id)).length; return h?`\n\n(${h} selected student${h!==1?'s are':' is'} not in the list currently shown)`:''; })()+
+    `\n\nAdmission + books already collected: ${promoInr(collected)}\n`+
+    `${session} fee history will be preserved.\nContinue?`)) return;
 
-  const students   = ls('students')||[];
-  const marks      = ls('marks')||{};
-  const attendance = ls('attendance')||{};
-  const fees       = ls('fees')||{};
+  const students=ls('students')||[], marks=ls('marks')||{}, attendance=ls('attendance')||{}, fees=ls('fees')||{}, plans=ls('promoPayments')||{};
+  selected.forEach(sel=>{
+    const id=sel.id, st=PROMO.rows[id], toClass=st.to;
+    const idx=students.findIndex(s=>s.id===id); if(idx<0) return;
+    const s=students[idx];
+    const oldSession=s.session, oldClass=s.class, oldRoll=s.roll;
 
-  selected.forEach(id=>{
-    const idx = students.findIndex(s=>s.id===id);
-    if(idx<0) return;
-    const s = students[idx];
-
-    // Archive old session data
     if(!s.history) s.history=[];
-    s.history.push({
-      session:   s.session,
-      class:     s.class,
-      roll:      s.roll,
-      archivedAt: today()
-    });
+    s.history.push({session:oldSession,class:oldClass,roll:oldRoll,archivedAt:today()});
+    if(st.roll!=='') s.roll=parseInt(st.roll)||st.roll;
+    s.class=toClass; s.session=toSession;
+    s.studentId=`CPS${toSession}-${String(s.roll).padStart(3,'0')}`;
 
-    // Apply new roll if provided, else keep old
-    const newRoll = rollMap[id];
-    if(newRoll!==undefined) students[idx].roll = newRoll;
-
-    // Promote
-    students[idx].class   = toClass;
-    students[idx].session = toSession;
-
-    // Generate new student ID for new session
-    students[idx].studentId = `CPS${toSession}-${String(students[idx].roll).padStart(3,'0')}`;
-
-    // Archive fee data, reset for new session
-    const oldFee = fees[id]||{};
-    fees[id] = {
-      previousYears: [
-        ...(oldFee.previousYears||[]),
-        { session: s.session, class: fromClass, roll: s.roll, ...oldFee, previousYears: undefined }
-      ],
-      admissionPaid: 0, admissionTotal: 0, monthly: {}, exam: {}
+    // Fees: archive the old session, start the new one with admission + books already settled
+    const oldFee=fees[id]||{};
+    const plan=plans[id]||promoPlanFor(id,toClass,toSession);
+    const t=promoPlanTotals(plan);
+    const lastMode=(plan.payments&&plan.payments.length)?plan.payments[plan.payments.length-1].mode:'Cash';
+    const nf={
+      previousYears:[...(oldFee.previousYears||[]),{session:oldSession,class:oldClass,roll:oldRoll,...oldFee,previousYears:undefined}],
+      admissionTotal:t.admTotal, admissionSet:true, admissionPaid:t.admPaid,
+      admissionHistory:t.admPaid>0?[{date:today(),amount:t.admPaid,mode:lastMode,note:'Collected before promotion'}]:[],
+      monthly:{}, exam:{},
+      books:{session:toSession,class:toClass,items:(plan.books||[]).filter(b=>b.take!==false).map(b=>({name:b.name,price:b.price})),total:t.booksTotal,paid:t.booksPaid},
+      promoPayments:plan.payments||[]
     };
+    let wallet=parseFloat(oldFee.wallet)||0; const wh=[...(oldFee.walletHistory||[])];
+    if(t.excess>0){ wallet=Math.round((wallet+t.excess)*100)/100; wh.push({date:today(),type:'credit',amount:t.excess,note:'Excess collected before promotion',balanceAfter:wallet}); }
+    if(wallet>0||wh.length){ nf.wallet=wallet; nf.walletHistory=wh; }   // keep the wallet — it is the parent's money
+    fees[id]=nf;
+    delete plans[id];
 
-    // Reset academic records for new session
-    marks[id]      = {};
-    attendance[id] = {};
+    marks[id]={}; attendance[id]={};
   });
 
-  ss('students',  students);
-  ss('marks',     marks);
-  ss('attendance',attendance);
-  ss('fees',      fees);
-
-  toast(`✅ ${selected.length} student${selected.length!==1?'s':''} promoted to ${toClass} — Session ${toSession}!`);
+  ss('students',students); ss('marks',marks); ss('attendance',attendance); ss('fees',fees); ss('promoPayments',plans);
+  toast(`✅ ${selected.length} student${selected.length!==1?'s':''} promoted — Session ${toSession}!`);
   showPage('promotion');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  NEW ADMISSIONS — admission fee + ALL books for the class (editable per student)
+//  Admission lives in fees[id].admissionTotal/admissionPaid (so Fee Register / Due Report agree).
+//  Books live in fees[id].books = {session,class,items:[{id,name,price,take}],total,paid,history}.
+//  A student with no books record owes the class's full book list by default.
+// ═══════════════════════════════════════════════════════════════════════════
+let _naModal=null;
+function naBuild(s){
+  const sf=(ls('fees')||{})[s.id]||{};
+  const clsBooks=getPromoBooks(s.class);
+  const rec=(sf.books&&String(sf.books.session)===String(s.session))?sf.books:null;
+  let books;
+  if(rec){
+    const items=rec.items||[];
+    books=clsBooks.map(b=>{
+      const m=items.find(x=>(x.id&&x.id===b.id)||x.name===b.name);
+      return m?{id:b.id,name:m.name,price:parseFloat(m.price)||0,take:m.take!==false}
+              :{id:b.id,name:b.name,price:parseFloat(b.price)||0,take:false};
+    });
+    items.forEach(x=>{ if(!books.some(b=>b.name===x.name)) books.push({id:x.id||uid(),name:x.name,price:parseFloat(x.price)||0,take:x.take!==false}); });
+  } else {
+    books=clsBooks.map(b=>({id:b.id,name:b.name,price:parseFloat(b.price)||0,take:true}));
+  }
+  const stored=parseFloat(sf.admissionTotal);
+  const admTotal=sf.admissionSet?(stored||0):(stored>0?stored:(parseFloat(getEffectiveFee(s.id,'admission',s.class))||0));
+  const paid=(parseFloat(sf.admissionPaid)||0)+(rec?(parseFloat(rec.paid)||0):0);
+  return {plan:{admTotal,books,paid}};
+}
+function naTotals(s){ const {plan}=naBuild(s); return {plan,t:promoPlanTotals(plan)}; }
+function naRefresh(){
+  const el=document.getElementById('ptNewAdmission'); if(!el) return;
+  const nxt=String(parseInt(getActiveSession())+1);
+  el.innerHTML=buildNewAdmissionPanel(nxt,ls('sessions')||['2025','2026','2027','2028']);
+}
+function openNewAdmCharges(id){
+  const s=(ls('students')||[]).find(x=>x.id===id); if(!s){ toast('Student not found','error'); return; }
+  const {plan}=naBuild(s); const t=promoPlanTotals(plan);
+  _naModal={id,plan:JSON.parse(JSON.stringify(plan))};
+  const inp='padding:7px 9px;border:2px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;font-weight:700;color:#1a3a6b;outline:none';
+  const body=`
+  <div style="background:#f0f4ff;border-radius:10px;padding:10px 14px;margin-bottom:12px">
+    <div style="font-weight:900;color:#1a3a6b">${esc(s.name)} <span style="font-weight:600;color:#6b7a99">· Roll ${s.roll}</span></div>
+    <div style="font-size:12px;color:#475569">New admission · <b style="color:#0d9488">${esc(s.class)}</b> · Session ${s.session}</div></div>
+  <div style="font-size:12px;font-weight:900;color:#0d1f3c;margin-bottom:6px">1. Admission fee</div>
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+    <input type="number" min="0" id="naAdm" value="${plan.admTotal}" oninput="naModalRecalc()" style="${inp};width:140px">
+    <span style="font-size:11px;color:#9aa8c0">Class default ${promoInr(getClassAdmissionFee(s.class))} — change for this student only if needed (0 = waived)</span></div>
+  <div style="font-size:12px;font-weight:900;color:#0d1f3c;margin-bottom:6px">2. Books &amp; items <span style="font-weight:600;color:#9aa8c0">— untick anything this student does not take</span></div>
+  ${plan.books.length?`<div style="border:1.5px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:14px">
+    ${plan.books.map((b,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid #f0f4ff">
+      <input type="checkbox" id="naTake_${i}" ${b.take!==false?'checked':''} onchange="naModalRecalc()" style="width:17px;height:17px;accent-color:#1a3a6b;cursor:pointer">
+      <label for="naTake_${i}" id="naName_${i}" style="flex:1;font-size:13px;font-weight:700;color:#1a3a6b;cursor:pointer">${esc(b.name)}</label>
+      <input type="number" min="0" id="naPrice_${i}" value="${b.price}" oninput="naModalRecalc()" style="${inp};width:100px;text-align:right"></div>`).join('')}</div>`
+    :`<div style="border:1.5px dashed #cbd5e1;border-radius:10px;padding:14px;text-align:center;color:#9aa8c0;font-size:12px;margin-bottom:14px">No books set for ${esc(s.class)}. Add them in the <b>Admission &amp; Books Setup</b> tab.</div>`}
+  <div style="background:#f8faff;border:1.5px solid #e2e8f0;border-radius:10px;padding:12px 14px;font-size:13px">
+    <div style="display:flex;justify-content:space-between"><span>Admission</span><b id="naTAdm">${promoInr(t.admTotal)}</b></div>
+    <div style="display:flex;justify-content:space-between"><span>Books (<span id="naTCnt">${t.booksCount}</span>)</span><b id="naTBooks">${promoInr(t.booksTotal)}</b></div>
+    <div style="display:flex;justify-content:space-between;border-top:1px dashed #cbd5e1;margin-top:5px;padding-top:5px;font-size:14px"><b>Total payable</b><b id="naTGrand" style="color:#1a3a6b">${promoInr(t.grand)}</b></div>
+    <div style="display:flex;justify-content:space-between;color:#15803d"><span>Already paid</span><b id="naTPaid">${promoInr(t.paid)}</b></div>
+    <div style="display:flex;justify-content:space-between;color:#dc2626;font-size:14px"><b>Balance</b><b id="naTDue">${promoInr(t.due)}</b></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
+    <div class="form-group" style="margin:0"><label>Collect now (₹)</label><input type="number" min="0" id="naPay" value="${t.due}" oninput="this.dataset.touched='1'" style="${inp};width:100%"></div>
+    <div class="form-group" style="margin:0"><label>Payment Mode</label><select id="naMode" class="form-control"><option>Cash</option><option>UPI</option><option>Cheque</option><option>Bank Transfer</option></select></div>
+  </div>`;
+  openModal(`Admission & Books — ${s.name}`,body,[
+    {label:'<i class="fas fa-hand-holding-usd"></i> Save & Collect',cls:'btn-success',onclick:'naModalSave(true)'},
+    {label:'<i class="fas fa-save"></i> Save Charges Only',cls:'btn-primary',onclick:'naModalSave(false)'},
+    {label:'Cancel',cls:'btn-outline',onclick:'closeModal();naRefresh()'}
+  ]);
+  naModalRecalc();
+}
+function naModalRead(){
+  const m=_naModal;
+  const admTotal=Math.max(0,parseFloat(document.getElementById('naAdm')?.value)||0);
+  const books=m.plan.books.map((b,i)=>({id:b.id,name:b.name,
+    price:Math.max(0,parseFloat(document.getElementById('naPrice_'+i)?.value)||0),
+    take:!!document.getElementById('naTake_'+i)?.checked}));
+  return {admTotal,books};
+}
+function naModalRecalc(){
+  const m=_naModal; if(!m) return;
+  const {admTotal,books}=naModalRead();
+  const t=promoPlanTotals({admTotal,books,paid:m.plan.paid});
+  const set=(id,v)=>{ const e=document.getElementById(id); if(e) e.textContent=v; };
+  set('naTAdm',promoInr(t.admTotal)); set('naTBooks',promoInr(t.booksTotal)); set('naTCnt',t.booksCount);
+  set('naTGrand',promoInr(t.grand)); set('naTPaid',promoInr(t.paid)); set('naTDue',promoInr(t.due));
+  books.forEach((b,i)=>{ const n=document.getElementById('naName_'+i); if(n){ n.style.opacity=b.take?1:.4; n.style.textDecoration=b.take?'none':'line-through'; } });
+  const pay=document.getElementById('naPay'); if(pay&&!pay.dataset.touched) pay.value=t.due;
+}
+function naModalSave(collect){
+  const m=_naModal; if(!m) return;
+  const s=(ls('students')||[]).find(x=>x.id===m.id); if(!s) return;
+  const r2=x=>Math.round(x*100)/100;
+  const {admTotal,books}=naModalRead();
+  const mode=document.getElementById('naMode')?.value||'Cash';
+  let pay=0;
+  if(collect){
+    pay=r2(parseFloat(document.getElementById('naPay')?.value)||0);
+    const due=promoPlanTotals({admTotal,books,paid:m.plan.paid}).due;
+    if(pay<=0){ toast('Enter the amount to collect','error'); return; }
+    if(pay>due+0.001){ toast(`Amount is more than the balance ${promoInr(due)}`,'error'); return; }
+  }
+  const tt=promoPlanTotals({admTotal,books,paid:r2(m.plan.paid+pay)});
+  const fees=ls('fees')||{}; const sf=fees[m.id]||{};
+  const oldAdmPaid=parseFloat(sf.admissionPaid)||0;
+  const sameBooks=sf.books&&String(sf.books.session)===String(s.session);
+  const oldBooksPaid=sameBooks?(parseFloat(sf.books.paid)||0):0;
+  sf.admissionTotal=tt.admTotal; sf.admissionSet=true; sf.admissionPaid=tt.admPaid;
+  const admDelta=r2(tt.admPaid-oldAdmPaid);
+  if(admDelta>0) sf.admissionHistory=[...(sf.admissionHistory||[]),{date:today(),amount:admDelta,mode}];
+  const bDelta=r2(tt.booksPaid-oldBooksPaid);
+  const hist=sameBooks?(sf.books.history||[]):[];
+  sf.books={session:s.session,class:s.class,items:books.map(b=>({id:b.id,name:b.name,price:b.price,take:b.take})),
+    total:tt.booksTotal,paid:tt.booksPaid,history:bDelta>0?[...hist,{date:today(),amount:bDelta,mode}]:hist};
+  fees[m.id]=sf; ss('fees',fees);
+  if(tt.excess>0) creditWallet(m.id,tt.excess,'Excess admission/books payment');   // never lose the parent's money
+  let rId=null;
+  if(pay>0) rId=saveReceiptV5(m.id,'Admission & Books',pay,mode,`Admission & Books for ${s.class} (${s.session})`,[],tt.due);
+  closeModal(); naRefresh();
+  toast(pay>0?`Collected ${promoInr(pay)} — receipt printing`:'Charges saved');
+  if(rId) printReceiptV5(rId);
+}
+
+// The Student Profile "Promote" button used to move a student without any fee check.
+// It now opens the same checked flow (dues + admission + books + custom class).
+function promoteStudent(studentId){
+  const s=(ls('students')||[]).find(x=>x.id===studentId);
+  if(!s){ toast('Student not found','error'); return; }
+  showPage('promotion');
+  setTimeout(()=>{
+    switchPromoTab('ptPromote',document.querySelectorAll('.promo-tab')[1]);
+    const fs=document.getElementById('promFromSession'); if(fs) fs.value=String(s.session);
+    const f=document.getElementById('promFrom'); if(f) f.value=s.class;
+    const q=document.getElementById('promSearch'); if(q) q.value=s.name;
+    const t=document.getElementById('promTo'); if(t) delete t.dataset.manualSet;
+    promoFromSessionChanged();
+    toast(`Promote ${s.name} here — dues, admission & books are checked first`,'info');
+  },60);
 }
 
 
@@ -9911,7 +10335,7 @@ function clearAllData(){
 // ═══════════════════════════════════════════════════════════════════════
 //  CLOUD SYNC (Supabase) — auto-sync + manual backup/restore, multi-device
 // ═══════════════════════════════════════════════════════════════════════
-const CLOUD_SYNC_KEYS=['users','students','teachers','fees','attendance','marks','notices','calendar','stock','sales','expenses','routine','classSubjects','ageRanges','feeStructure','activeSession','receipts','idCardLayout','studentFollowUps','attentionSettings','academicHistory','syllabus','teacherAbsent','periodTimings','settings','sessions','substituteAssignments','examRegisterMarks','marksSourceLog','marksSubmissionDeadline','govRecords','govSubmissionHistory','govActivityLog','govAgeRules','transferCertificates','workloadThresholds','dismissal','dismissalSettings'];
+const CLOUD_SYNC_KEYS=['users','students','teachers','fees','attendance','marks','notices','calendar','stock','sales','expenses','routine','classSubjects','ageRanges','feeStructure','activeSession','receipts','idCardLayout','studentFollowUps','attentionSettings','academicHistory','syllabus','teacherAbsent','periodTimings','settings','sessions','substituteAssignments','examRegisterMarks','marksSourceLog','marksSubmissionDeadline','govRecords','govSubmissionHistory','govActivityLog','govAgeRules','transferCertificates','workloadThresholds','dismissal','dismissalSettings','promoBooks','promoPayments'];
 
 let _sbClient=null, _sbUser=null, _sbChannel=null, _sbPushTimers={}, _sbBusy=false;
 const _sbOrigin='dev_'+Math.random().toString(36).slice(2)+'_'+Date.now();
@@ -16551,7 +16975,7 @@ function removeAcademicHistory(studentId,idx){
   openStudentProfile(studentId);
 }
 
-function promoteStudent(studentId){
+function promoteStudentLegacy(studentId){
   const students=ls('students')||[];
   const s=students.find(x=>x.id===studentId);
   if(!s){toast('Student not found','error');return;}
@@ -21898,7 +22322,7 @@ function saveNewStudent(){
 
   const newStudent = {
     id: uid(),
-    studentId: genStudentID(),
+    studentId: `CPS${session}-${String(students.filter(x=>x.session===session).length+1).padStart(3,'0')}`,
     name, roll: parseInt(roll)||roll,
     class: cls, section, session,
     ...values,
@@ -21908,7 +22332,11 @@ function saveNewStudent(){
   ss('students', students);
   closeModal();
   toast(`✅ ${name} added successfully!`);
-  showPage('students');
+  if(parseInt(session)>parseInt(getActiveSession())){
+    // advance admission: collect admission fee + books straight away
+    showPage('promotion');
+    setTimeout(()=>{ switchPromoTab('ptNewAdmission',document.querySelectorAll('.promo-tab')[2]); openNewAdmCharges(newStudent.id); },80);
+  } else showPage('students');
 }
 
 function openEditStudent(id){
