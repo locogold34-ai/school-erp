@@ -5293,11 +5293,18 @@ function computeStudentFeeTotals(s){
     else if(amt>0) examDueAmt+=amt;
   });
 
-  const totalPaid = admPaid+monthlyPaidAmt+examPaidAmt;
-  const totalDue  = admDue+monthlyDueAmt+examDueAmt;
+  // Books (admission-time books record: fees[id].books for this session)
+  const bk = (sf.books && String(sf.books.session)===String(s.session)) ? sf.books : null;
+  const booksTotal = bk ? (parseFloat(bk.total)||0) : 0;
+  const booksPaid  = bk ? Math.min(booksTotal, parseFloat(bk.paid)||0) : 0;
+  const booksDue   = Math.max(0, booksTotal-booksPaid);
+
+  const totalPaid = admPaid+monthlyPaidAmt+examPaidAmt+booksPaid;
+  const totalDue  = admDue+monthlyDueAmt+examDueAmt+booksDue;
 
   return { admTotal, admPaid, admDue, monthly, monthPaidCount, monthDueCount,
     monthlyPaidAmt, monthlyDueAmt, overdueAmt, examPaidAmt, examDueAmt,
+    booksTotal, booksPaid, booksDue,
     totalPaid, totalDue };
 }
 
@@ -6875,10 +6882,16 @@ function loadFeeRegister(){
         </div>
       </td>`;
 
+    const booksCell = t.booksTotal>0
+      ? `<td style="padding:3px 6px;text-align:center;cursor:pointer;min-width:90px" onclick="event.stopPropagation();openNewAdmCharges('${s.id}')" title="Open Admission & Books">
+           <div style="font-size:11px;font-weight:800;color:#1a3a6b">₹${t.booksPaid.toLocaleString('en-IN')} / ₹${t.booksTotal.toLocaleString('en-IN')}</div>
+           <div style="font-size:9px;font-weight:800;color:${t.booksDue>0?'#b91c1c':'#15803d'}">${t.booksDue>0?`Due ₹${t.booksDue.toLocaleString('en-IN')} 📚`:'✓ Paid 📚'}</div></td>`
+      : `<td style="padding:3px 6px;text-align:center;color:#cbd5e1">—</td>`;
     rows += `<tr id="frRow_${s.id}" style="border-bottom:1px solid #f0f4ff">
       <td style="padding:8px 10px;font-weight:800;color:#1a3a6b;text-align:center">${s.roll}</td>
       <td style="padding:8px 10px;font-weight:700;color:#0d1f3c;white-space:nowrap;min-width:130px">${esc(s.name)}</td>
       ${admCell}
+      ${booksCell}
       ${monthCells}
       ${examCells}
       <td style="padding:8px 10px;text-align:right;font-weight:800;color:#15803d;white-space:nowrap">
@@ -6902,6 +6915,9 @@ function loadFeeRegister(){
           <th style="padding:10px 8px;color:#fff;text-align:center;min-width:95px">
             Admission<br><span style="font-size:9px;opacity:.8;font-weight:500">Total / Paid</span>
           </th>
+          <th style="padding:10px 8px;color:#fff;text-align:center;min-width:90px">
+            Books<br><span style="font-size:9px;opacity:.8;font-weight:500">Paid / Total</span>
+          </th>
           ${MONTHS.map(m=>`<th style="padding:8px 3px;color:#fff;text-align:center;min-width:30px;font-size:10px;font-weight:700">${m}</th>`).join('')}
           <th style="padding:8px 4px;color:#fff;text-align:center;min-width:30px;font-size:10px">T1</th>
           <th style="padding:8px 4px;color:#fff;text-align:center;min-width:30px;font-size:10px">T2</th>
@@ -6913,7 +6929,7 @@ function loadFeeRegister(){
       <tbody>${rows}</tbody>
       <tfoot>
         <tr style="background:#f0f4ff;border-top:2.5px solid #1a3a6b">
-          <td colspan="${3+12+3}" style="padding:11px 10px;text-align:right;font-weight:900;color:#1a3a6b;font-size:13px">
+          <td colspan="${4+12+3}" style="padding:11px 10px;text-align:right;font-weight:900;color:#1a3a6b;font-size:13px">
             CLASS TOTAL — ${cls}:
           </td>
           <td style="padding:11px 10px;text-align:right;font-weight:900;color:#15803d;font-size:14px">
@@ -8901,6 +8917,7 @@ function buildNewAdmissionPanel(nextSession, allSessions){
     if(a.class<b.class)return -1; if(a.class>b.class)return 1; return (a.roll||0)-(b.roll||0);
   });
 
+  naEnsureRecords(nextStudents);
   const naRows = nextStudents.map(s=>({s,...naTotals(s)}));
   const rows = naRows.map(({s,plan,t})=>`<tr>
       <td style="font-weight:800;color:#1a3a6b">${esc(s.name)}</td>
@@ -9176,7 +9193,7 @@ function promoPrevDues(s){
   let n=0;
   for(let m=0;m<=upto;m++){ const mf=(sf.monthly||{})[m]; if(!(mf&&mf.paid)&&rate>0) n++; }
   const monthlyDue=n*rate;
-  return { admDue:t.admDue, monthN:n, monthlyDue, examDue:t.examDueAmt, total:t.admDue+monthlyDue+t.examDueAmt };
+  return { admDue:t.admDue, monthN:n, monthlyDue, examDue:t.examDueAmt, booksDue:t.booksDue||0, total:t.admDue+monthlyDue+t.examDueAmt+(t.booksDue||0) };
 }
 
 function promoRowInfo(s){
@@ -9377,7 +9394,7 @@ function renderPromoList(){
     const bg=sp?'#fffbeb':(i%2===0?'white':'#fafcff');
     const prevCell=p.total>0
       ? `<div style="font-weight:900;color:#dc2626">${promoInr(p.total)}</div>
-         <div style="font-size:10px;color:#9a3412;line-height:1.35">${p.admDue>0?'Admission '+promoInr(p.admDue)+'<br>':''}${p.monthlyDue>0?'Monthly '+p.monthN+' mo · '+promoInr(p.monthlyDue)+'<br>':''}${p.examDue>0?'Exam '+promoInr(p.examDue):''}</div>
+         <div style="font-size:10px;color:#9a3412;line-height:1.35">${p.admDue>0?'Admission '+promoInr(p.admDue)+'<br>':''}${p.monthlyDue>0?'Monthly '+p.monthN+' mo · '+promoInr(p.monthlyDue)+'<br>':''}${p.examDue>0?'Exam '+promoInr(p.examDue)+'<br>':''}${p.booksDue>0?'Books '+promoInr(p.booksDue):''}</div>
          <button onclick="promoCollectPrev('${s.id}')" style="margin-top:4px;padding:3px 9px;background:#dc2626;color:white;border:none;border-radius:6px;font-size:11px;font-weight:800;cursor:pointer"><i class="fas fa-rupee-sign"></i> Collect</button>`
       : `<span style="background:#f0fdf4;color:#15803d;padding:3px 10px;border-radius:8px;font-size:11px;font-weight:800">✓ Clear</span>`;
     const chCell=!inf.plan
@@ -9532,7 +9549,7 @@ function openPromoCharges(id){
     <div style="font-size:12px;color:#475569">${esc(s.class)} (${PROMO.session}) → <b style="color:#0d9488">${esc(toClass)}</b> (${toSession}) ${sp?`<span style="color:#b45309;font-weight:800">· ${sp}</span>`:''}</div>
   </div>
   ${prev.total>0?`<div style="background:#fff1f2;border:1.5px solid #fca5a5;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#b91c1c">
-      <b>⚠️ ${PROMO.session} dues pending: ${promoInr(prev.total)}</b> — Admission ${promoInr(prev.admDue)} · Monthly ${prev.monthN} mo ${promoInr(prev.monthlyDue)} · Exam ${promoInr(prev.examDue)}<br>
+      <b>⚠️ ${PROMO.session} dues pending: ${promoInr(prev.total)}</b> — Admission ${promoInr(prev.admDue)} · Monthly ${prev.monthN} mo ${promoInr(prev.monthlyDue)} · Exam ${promoInr(prev.examDue)}${prev.booksDue>0?' · Books '+promoInr(prev.booksDue):''}<br>
       This student cannot be promoted until these are cleared.
       <button class="btn btn-sm" style="margin-left:8px;background:#dc2626;color:white;border:none" onclick="closeModal();openCollectFee('${id}')">Collect previous dues</button></div>`
     :`<div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;padding:8px 14px;margin-bottom:12px;font-size:12px;color:#15803d;font-weight:800">✓ ${PROMO.session} dues are clear</div>`}
@@ -9711,12 +9728,29 @@ function naBuild(s){
   const paid=(parseFloat(sf.admissionPaid)||0)+(rec?(parseFloat(rec.paid)||0):0);
   return {plan:{admTotal,books,paid}};
 }
+// Make sure every advance-admitted student has a saved admission+books record, so the
+// Fee Register / Collect Fee / Due Report show the same numbers as the New Admissions tab.
+// Money already recorded as "admission paid" beyond the admission fee is moved to books.
+function naEnsureRecords(students){
+  const fees=ls('fees')||{}; let changed=false;
+  students.forEach(s=>{
+    const sf=fees[s.id]||{};
+    if(sf.books&&String(sf.books.session)===String(s.session)) return;
+    const {plan}=naBuild(s); const t=promoPlanTotals(plan);
+    if(!t.booksAll) return;                       // class has no books set -> nothing to record
+    sf.admissionTotal=t.admTotal; sf.admissionSet=true; sf.admissionPaid=t.admPaid;
+    sf.books={session:s.session,class:s.class,items:plan.books.map(b=>({id:b.id,name:b.name,price:b.price,take:b.take})),total:t.booksTotal,paid:t.booksPaid,history:[]};
+    fees[s.id]=sf; changed=true;
+  });
+  if(changed) ss('fees',fees);
+}
 function naTotals(s){ const {plan}=naBuild(s); return {plan,t:promoPlanTotals(plan)}; }
 function naRefresh(){
   const el=document.getElementById('ptNewAdmission'); if(!el) return;
   const nxt=String(parseInt(getActiveSession())+1);
   el.innerHTML=buildNewAdmissionPanel(nxt,ls('sessions')||['2025','2026','2027','2028']);
 }
+function naRefreshAll(){ naRefresh(); if(document.getElementById('feeRegisterTable')&&typeof loadFeeRegister==='function') loadFeeRegister(); }
 function openNewAdmCharges(id){
   const s=(ls('students')||[]).find(x=>x.id===id); if(!s){ toast('Student not found','error'); return; }
   const {plan}=naBuild(s); const t=promoPlanTotals(plan);
@@ -9751,7 +9785,7 @@ function openNewAdmCharges(id){
   openModal(`Admission & Books — ${s.name}`,body,[
     {label:'<i class="fas fa-hand-holding-usd"></i> Save & Collect',cls:'btn-success',onclick:'naModalSave(true)'},
     {label:'<i class="fas fa-save"></i> Save Charges Only',cls:'btn-primary',onclick:'naModalSave(false)'},
-    {label:'Cancel',cls:'btn-outline',onclick:'closeModal();naRefresh()'}
+    {label:'Cancel',cls:'btn-outline',onclick:'closeModal();naRefreshAll()'}
   ]);
   naModalRecalc();
 }
@@ -9802,7 +9836,7 @@ function naModalSave(collect){
   if(tt.excess>0) creditWallet(m.id,tt.excess,'Excess admission/books payment');   // never lose the parent's money
   let rId=null;
   if(pay>0) rId=saveReceiptV5(m.id,'Admission & Books',pay,mode,`Admission & Books for ${s.class} (${s.session})`,[],tt.due);
-  closeModal(); naRefresh();
+  closeModal(); naRefreshAll();
   toast(pay>0?`Collected ${promoInr(pay)} — receipt printing`:'Charges saved');
   if(rId) printReceiptV5(rId);
 }
@@ -17317,6 +17351,7 @@ function getEffectiveFee(studentId, feeType, cls) {
   const custom = sf.customFee || {};
   const cf     = (fs.classFees || {})[cls] || {};
 
+  if (feeType==='admission' && sf.admissionSet && sf.admissionTotal!=null && sf.admissionTotal!=='') return parseFloat(sf.admissionTotal)||0;
   if (feeType==='admission') return custom.admissionFee!=null ? custom.admissionFee : (cf.admissionFee ?? fs.admissionFee ?? 500);
   if (feeType==='monthly')   return custom.monthlyFee  !=null ? custom.monthlyFee   : (cf.monthlyFee   ?? (fs.monthlyFee?.[cls]) ?? (fs.monthlyFee?.default) ?? 300);
   if (feeType==='exam1')     return custom.examFee1    !=null ? custom.examFee1     : (cf.examFee1     ?? fs.examFee?.term1 ?? 200);
@@ -21175,6 +21210,9 @@ function openCollectFee(studentId){
     </div>
   </div>
 
+  ${(()=>{ const bt=computeStudentFeeTotals(s); if(!(bt.booksTotal>0)) return ''; return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:${bt.booksDue>0?'#fff7ed':'#f0fdf4'};border:1.5px solid ${bt.booksDue>0?'#fdba74':'#bbf7d0'};border-radius:10px;padding:9px 13px;margin-bottom:12px">
+      <div style="font-size:12px;font-weight:800;color:#1a3a6b">📚 Books: ₹${bt.booksPaid.toLocaleString('en-IN')} paid of ₹${bt.booksTotal.toLocaleString('en-IN')} ${bt.booksDue>0?`<span style="color:#b91c1c">· Due ₹${bt.booksDue.toLocaleString('en-IN')}</span>`:'<span style="color:#15803d">· ✓ Paid</span>'}</div>
+      <button class="btn btn-sm btn-success" onclick="closeModal();openNewAdmCharges('${s.id}')"><i class="fas fa-book"></i> Books / Admission & Books</button></div>`; })()}
   <div class="tabs" style="margin-bottom:0">
     <button class="tab active" onclick="switchFeeTab('ftAdm8',this)">🏷️ Admission</button>
     <button class="tab" onclick="switchFeeTab('ftMonthly8',this)">📅 Monthly</button>
@@ -22334,6 +22372,7 @@ function saveNewStudent(){
   toast(`✅ ${name} added successfully!`);
   if(parseInt(session)>parseInt(getActiveSession())){
     // advance admission: collect admission fee + books straight away
+    naEnsureRecords([newStudent]);
     showPage('promotion');
     setTimeout(()=>{ switchPromoTab('ptNewAdmission',document.querySelectorAll('.promo-tab')[2]); openNewAdmCharges(newStudent.id); },80);
   } else showPage('students');
