@@ -8900,18 +8900,20 @@ function filterAndGoStudents(cls, session){
 }
 
 // ── New Admissions Panel ───────────────────────────────────────────────────
-function buildNewAdmissionPanel(nextSession, allSessions){
+function buildNewAdmissionPanel(defaultYear, allSessions){
+  const nextSession = String(parseInt(getActiveSession())+1);
+  const activeY = String(getActiveSession());
   const students = ls('students')||[];
   const fees = ls('fees')||{};
   const fs = ls('feeStructure')||{};
-  const nextStudents = students.filter(s=>s.session===nextSession).sort((a,b)=>{
+  const nextStudents = students.filter(s=>s.session===nextSession||(s.session===activeY&&s.newAdmission)).sort((a,b)=>{
     if(a.class<b.class)return -1; if(a.class>b.class)return 1; return (a.roll||0)-(b.roll||0);
   });
 
   naEnsureRecords(nextStudents);   // also runs the one-time books migration
   const naRows = nextStudents.map(s=>({s,...naTotals(s)}));
   const rows = naRows.map(({s,plan,t})=>`<tr>
-      <td style="font-weight:800;color:#1a3a6b">${esc(s.name)}</td>
+      <td style="font-weight:800;color:#1a3a6b">${esc(s.name)}<div style="font-size:10px;color:#9aa8c0;font-weight:700">Session ${s.session}</div></td>
       <td style="font-size:11px;color:#6b7a99">${esc(s.fatherName||'—')}</td>
       <td><span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700">${esc(s.class)}</span></td>
       <td style="text-align:center;font-weight:800;color:#c9a84c">${s.roll}</td>
@@ -8932,16 +8934,18 @@ function buildNewAdmissionPanel(nextSession, allSessions){
   const totalAdmPaid = naRows.reduce((a,r)=>a+r.t.paid,0);
 
   return `
-  <!-- Quick Add Button -->
+  <!-- Year + Quick Add -->
   <div class="card" style="padding:16px;margin-bottom:16px;background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1.5px solid #bfdbfe">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
       <div>
-        <div style="font-size:15px;font-weight:900;color:#1e3a5f">Advance Admissions for ${nextSession}</div>
-        <div style="font-size:12px;color:#3b82f6;margin-top:2px">Admit students now for the upcoming session. Every new student pays the <b>admission fee + all books</b> of the class (amounts come from the <b>Admission &amp; Books Setup</b> tab; you can edit them or drop a book for any one student).</div>
+        <div style="font-size:15px;font-weight:900;color:#1e3a5f">New Admissions</div>
+        <div style="font-size:12px;color:#3b82f6;margin-top:2px">Every new student pays the <b>admission fee + all books</b> of the class for that year (amounts come from the <b>Admission &amp; Books Setup</b> tab; you can edit them or drop a book for any one student).</div>
       </div>
-      <button class="btn btn-primary" style="font-size:14px;padding:10px 20px" onclick="openAddStudentForSession('${nextSession}')">
-        <i class="fas fa-user-plus"></i> Add New Student for ${nextSession}
-      </button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+      ${promoYearChoices().map(y=>`
+      <button class="btn ${y===nextSession?'btn-primary':'btn-outline'}" style="font-size:13px;padding:9px 16px" onclick="openAddStudentForSession('${y}')">
+        <i class="fas fa-user-plus"></i> Add New Student for ${y} <span style="opacity:.75;font-weight:600">(${promoYearTag(y)})</span></button>`).join('')}
     </div>
   </div>
 
@@ -8962,7 +8966,7 @@ function buildNewAdmissionPanel(nextSession, allSessions){
     </div>
   </div>
   <div class="card" style="padding:18px">
-    <div style="font-size:13px;font-weight:900;color:#0d1f3c;margin-bottom:14px"><i class="fas fa-list" style="color:#c9a84c"></i> All Advance Admitted Students — ${nextSession}</div>
+    <div style="font-size:13px;font-weight:900;color:#0d1f3c;margin-bottom:14px"><i class="fas fa-list" style="color:#c9a84c"></i> All New Admissions — ${activeY} &amp; ${nextSession}</div>
     <div class="table-wrap">
       <table>
         <thead><tr>
@@ -8975,18 +8979,22 @@ function buildNewAdmissionPanel(nextSession, allSessions){
   </div>` : `
   <div style="background:white;border-radius:14px;padding:40px;text-align:center;border:2px dashed #d0dbe8">
     <div style="font-size:48px;margin-bottom:12px">🎓</div>
-    <div style="font-size:16px;font-weight:800;color:#1a3a6b;margin-bottom:6px">No advance admissions yet for ${nextSession}</div>
+    <div style="font-size:16px;font-weight:800;color:#1a3a6b;margin-bottom:6px">No admissions yet for ${nextSession}</div>
     <div style="font-size:13px;color:#6b7a99;margin-bottom:20px">Start admitting students for the upcoming academic year</div>
     <button class="btn btn-primary" onclick="openAddStudentForSession('${nextSession}')"><i class="fas fa-user-plus"></i> Admit First Student for ${nextSession}</button>
   </div>`}`;
 }
 
 function openAddStudentForSession(session){
-  openAddStudent();
-  // After modal opens, pre-select the target session
+  session=String(session);
+  openAddStudent();                 // (this resets the flag)
+  window._naFromAdm=true;           // saveNewStudent then returns to New Admissions and opens Admission & Books
   setTimeout(()=>{
     const sel = document.getElementById('asSession');
-    if(sel) sel.value = session;
+    if(sel){
+      if(![...sel.options].some(o=>o.value===session)){ const o=document.createElement('option'); o.value=session; o.textContent=session; sel.appendChild(o); }
+      sel.value = session;
+    }
   }, 100);
 }
 
@@ -9139,15 +9147,45 @@ function promoSpecialLabel(from,to){
 }
 
 // ── store helpers ──────────────────────────────────────────────────────────
-function getPromoBooks(cls){ const all=ls('promoBooks')||{}; return Array.isArray(all[cls])?all[cls]:[]; }
-function setPromoBooks(cls,arr){ const all=ls('promoBooks')||{}; all[cls]=arr; ss('promoBooks',all); }
-function getClassAdmissionFee(cls){
+// Setup is stored per YEAR:  promoSetup = { "2027": { "Class 1 A": {admission:1700, books:[{id,name,price}]} } }
+// Until a year/class has been edited, the older (year-less) values are used as defaults.
+function promoSetupEntryGet(cls,session){ const all=ls('promoSetup')||{}; return (all[String(session)]||{})[cls]||null; }
+function promoSetupEntrySet(cls,session,entry){
+  const all=ls('promoSetup')||{}; const y=String(session);
+  if(!all[y]) all[y]={}; all[y][cls]=entry; ss('promoSetup',all);
+}
+function getPromoBooks(cls,session){
+  const e=session?promoSetupEntryGet(cls,session):null;
+  if(e&&Array.isArray(e.books)) return e.books;
+  const all=ls('promoBooks')||{}; return Array.isArray(all[cls])?all[cls]:[];
+}
+function getClassAdmissionFee(cls,session){
+  const e=session?promoSetupEntryGet(cls,session):null;
+  if(e&&e.admission!=null&&e.admission!=='') return parseFloat(e.admission)||0;
   const fs=ls('feeStructure')||{}; const cf=(fs.classFees||{})[cls]||{};
   return parseFloat(cf.admissionFee ?? fs.admissionFee ?? 500)||0;
 }
-function setClassAdmissionFee(cls,v){
+function setPromoBooks(cls,arr,session){
+  if(!session){ const all=ls('promoBooks')||{}; all[cls]=arr; ss('promoBooks',all); return; }
+  const e=promoSetupEntryGet(cls,session)||{admission:getClassAdmissionFee(cls,session)};
+  e.books=arr; promoSetupEntrySet(cls,session,e);
+}
+function setClassAdmissionFee(cls,v,session){
+  if(session){
+    const e=promoSetupEntryGet(cls,session)||{books:getPromoBooks(cls,session).map(b=>({...b}))};
+    e.admission=v; promoSetupEntrySet(cls,session,e);
+    if(String(session)!==String(getActiveSession())) return;   // keep Fee Settings in step for the running year
+  }
   const fs=ls('feeStructure')||{}; if(!fs.classFees) fs.classFees={}; if(!fs.classFees[cls]) fs.classFees[cls]={};
   fs.classFees[cls].admissionFee=v; ss('feeStructure',fs);
+}
+function promoYearChoices(){
+  const a=parseInt(getActiveSession());
+  return [String(a),String(a+1)];        // admissions are only for the current year and the next year
+}
+function promoYearTag(y){
+  const a=parseInt(getActiveSession()), d=parseInt(y)-a;
+  return d===0?'current':d===1?'next year':d===-1?'previous year':d>1?'future':'past';
 }
 
 // ── per-student plan (new-session admission + books) ───────────────────────
@@ -9168,8 +9206,8 @@ function promoPlanFor(id,toClass,toSession){
 }
 function promoBuildPlan(s,toClass,toSession){
   const old=(ls('promoPayments')||{})[s.id];   // keep money already collected, even if class/session changed
-  return { studentId:s.id, toClass, toSession, admTotal:getClassAdmissionFee(toClass),
-    books:getPromoBooks(toClass).map(b=>({id:b.id,name:b.name,price:parseFloat(b.price)||0,take:true})),
+  return { studentId:s.id, toClass, toSession, admTotal:getClassAdmissionFee(toClass,toSession),
+    books:getPromoBooks(toClass,toSession).map(b=>({id:b.id,name:b.name,price:parseFloat(b.price)||0,take:true})),
     paid:old?(parseFloat(old.paid)||0):0, payments:old?(old.payments||[]):[], updatedAt:new Date().toISOString() };
 }
 function promoSavePlan(plan){ const all=ls('promoPayments')||{}; plan.updatedAt=new Date().toISOString(); all[plan.studentId]=plan; ss('promoPayments',all); }
@@ -9202,20 +9240,28 @@ function promoRowInfo(s){
 // ═══════════════════════════════════════════════════════════════════════════
 //  ADMISSION & BOOKS SETUP TAB
 // ═══════════════════════════════════════════════════════════════════════════
+function promoSetupYear(){
+  const ys=promoYearChoices();
+  if(!window._promoSetupYear||!ys.includes(String(window._promoSetupYear)))
+    window._promoSetupYear=String(window._naYear||(parseInt(getActiveSession())+1));
+  return String(window._promoSetupYear);
+}
 function buildPromoSetupPanel(){
   const classes=getAllClasses();
   if(!window._promoSetupClass||!classes.includes(window._promoSetupClass)) window._promoSetupClass=classes[0];
   return `<div id="promoSetupBody">${promoSetupInner()}</div>`;
 }
 function promoSetupInner(){
-  const classes=getAllClasses(), cls=window._promoSetupClass;
-  const books=getPromoBooks(cls), adm=getClassAdmissionFee(cls);
+  const classes=getAllClasses(), cls=window._promoSetupClass, yr=promoSetupYear();
+  const books=getPromoBooks(cls,yr), adm=getClassAdmissionFee(cls,yr);
+  const custom=!!promoSetupEntryGet(cls,yr);
   const bTotal=books.reduce((a,b)=>a+(parseFloat(b.price)||0),0);
   const inp='padding:8px 10px;border:2px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;font-weight:700;color:#1a3a6b;outline:none';
   const overview=classes.map(c=>{
-    const bk=getPromoBooks(c), bt=bk.reduce((a,b)=>a+(parseFloat(b.price)||0),0), a=getClassAdmissionFee(c);
+    const bk=getPromoBooks(c,yr), bt=bk.reduce((a,b)=>a+(parseFloat(b.price)||0),0), a=getClassAdmissionFee(c,yr);
+    const set=!!promoSetupEntryGet(c,yr);
     return `<tr style="${c===cls?'background:#eff6ff':''};cursor:pointer" onclick="promoSetupSelect('${esc(c)}')">
-      <td style="padding:7px 10px;font-weight:800;color:#1a3a6b">${esc(c)}</td>
+      <td style="padding:7px 10px;font-weight:800;color:#1a3a6b">${esc(c)} ${set?'':'<span style="font-size:9px;color:#9aa8c0;font-weight:700">(default)</span>'}</td>
       <td style="padding:7px 10px;text-align:right">${promoInr(a)}</td>
       <td style="padding:7px 10px;text-align:center">${bk.length}</td>
       <td style="padding:7px 10px;text-align:right">${promoInr(bt)}</td>
@@ -9223,14 +9269,22 @@ function promoSetupInner(){
   }).join('');
   return `
   <div class="card" style="padding:18px;margin-bottom:16px">
-    <div style="font-size:13px;font-weight:900;color:#0d1f3c;margin-bottom:4px"><i class="fas fa-book" style="color:#c9a84c"></i> Admission Fee &amp; Books — per class</div>
-    <div style="font-size:12px;color:#6b7a99;margin-bottom:14px">Set what a student pays when entering a class for the new session. When you promote a student to a class, these amounts load automatically — you can still change them for each student (or untick a book he/she does not want).</div>
-    <div style="display:grid;grid-template-columns:minmax(180px,260px) 1fr;gap:14px;align-items:end;margin-bottom:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:6px">
+      <div style="font-size:13px;font-weight:900;color:#0d1f3c"><i class="fas fa-book" style="color:#c9a84c"></i> Admission Fee &amp; Books — per class, per year</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:12px;font-weight:800;color:#6b7a99">Year:</span>
+        <select class="form-control" style="width:auto;min-width:120px;font-weight:800" onchange="promoSetupYearSelect(this.value)">
+          ${promoYearChoices().map(y=>`<option value="${y}" ${y===yr?'selected':''}>${y} (${promoYearTag(y)})</option>`).join('')}</select>
+      </div>
+    </div>
+    <div style="font-size:12px;color:#6b7a99;margin-bottom:14px">Set what a student pays for <b>${yr}</b> when entering a class. Admission fee + all books = one fee. Each year has its own amounts, so changing ${yr} never changes other years. You can still change the amounts for one student, or untick a book he/she does not want.</div>
+    <div style="display:grid;grid-template-columns:minmax(180px,260px) 1fr;gap:14px;align-items:end;margin-bottom:12px">
       <div class="form-group" style="margin:0"><label>Class</label>
         <select class="form-control" onchange="promoSetupSelect(this.value)">${classes.map(c=>`<option value="${esc(c)}" ${c===cls?'selected':''}>${esc(c)}</option>`).join('')}</select></div>
-      <div class="form-group" style="margin:0"><label>Admission Fee for ${esc(cls)} (₹) <span style="font-weight:600;color:#9aa8c0">— same value as Fee Settings</span></label>
+      <div class="form-group" style="margin:0"><label>Admission Fee for ${esc(cls)} — ${yr} (₹)</label>
         <input type="number" min="0" value="${adm}" style="${inp};width:160px" onchange="promoSetupSaveAdm(this.value)"></div>
     </div>
+    ${custom?'':`<div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:8px;padding:7px 12px;font-size:11px;color:#92400e;margin-bottom:12px">Nothing saved for ${esc(cls)} in ${yr} yet — showing the default values. Anything you change here is saved for ${yr} only.</div>`}
     <div style="overflow-x:auto;border:1.5px solid #e2e8f0;border-radius:10px">
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead><tr style="background:linear-gradient(135deg,#0d1f3c,#1a3a6b);color:rgba(255,255,255,.85);font-size:11px;text-transform:uppercase">
@@ -9241,7 +9295,7 @@ function promoSetupInner(){
             <td style="padding:7px 10px"><input type="text" value="${esc(b.name)}" style="${inp};width:100%" onchange="promoSetupEditBook('${b.id}','name',this.value)"></td>
             <td style="padding:7px 10px;text-align:right"><input type="number" min="0" value="${parseFloat(b.price)||0}" style="${inp};width:120px;text-align:right" onchange="promoSetupEditBook('${b.id}','price',this.value)"></td>
             <td style="padding:7px 10px;text-align:center"><button class="btn btn-sm" style="background:#fff1f2;color:#dc2626;border:1px solid #fca5a5" onclick="promoSetupDelBook('${b.id}')" title="Remove"><i class="fas fa-trash"></i></button></td></tr>`).join('')
-          :`<tr><td colspan="4" style="padding:22px;text-align:center;color:#9aa8c0">No books added for ${esc(cls)} yet — add them below.</td></tr>`}
+          :`<tr><td colspan="4" style="padding:22px;text-align:center;color:#9aa8c0">No books added for ${esc(cls)} (${yr}) yet — add them below.</td></tr>`}
           <tr style="background:#fffbeb">
             <td style="padding:8px 10px;text-align:center;color:#c9a84c;font-weight:900">+</td>
             <td style="padding:8px 10px"><input type="text" id="psNewName" placeholder="New book / item (e.g. English Reader, Copy set, Uniform)" style="${inp};width:100%" onkeydown="if(event.key==='Enter')document.getElementById('psNewPrice').focus()"></td>
@@ -9251,18 +9305,25 @@ function promoSetupInner(){
         <tfoot><tr style="background:#f0fdf4;font-weight:900">
           <td></td><td style="padding:10px;color:#166534">Books total (${books.length})  ·  Admission ${promoInr(adm)}</td>
           <td style="padding:10px;text-align:right;color:#166534">${promoInr(bTotal)}</td><td></td></tr>
-          <tr style="background:#dcfce7;font-weight:900"><td></td><td style="padding:10px;color:#14532d">Total to pay for ${esc(cls)} (admission + all books)</td>
+          <tr style="background:#dcfce7;font-weight:900"><td></td><td style="padding:10px;color:#14532d">Total to pay for ${esc(cls)} in ${yr} (admission + all books)</td>
           <td style="padding:10px;text-align:right;color:#14532d;font-size:15px">${promoInr(adm+bTotal)}</td><td></td></tr></tfoot>
       </table>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">
-      <span style="font-size:12px;color:#6b7a99;font-weight:700">Copy book list from:</span>
-      <select id="psCopyFrom" class="form-control" style="width:auto;min-width:160px">${classes.filter(c=>c!==cls).map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select>
-      <button class="btn btn-outline btn-sm" onclick="promoSetupCopy()"><i class="fas fa-copy"></i> Copy</button>
+    <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-top:12px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:12px;color:#6b7a99;font-weight:700">Copy this class from:</span>
+        <select id="psCopyFrom" class="form-control" style="width:auto;min-width:150px">${classes.filter(c=>c!==cls).map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select>
+        <button class="btn btn-outline btn-sm" onclick="promoSetupCopy()"><i class="fas fa-copy"></i> Copy</button>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:12px;color:#6b7a99;font-weight:700">Copy ALL classes from year:</span>
+        <select id="psCopyYear" class="form-control" style="width:auto;min-width:110px">${promoYearChoices().filter(y=>y!==yr).map(y=>`<option value="${y}">${y}</option>`).join('')}</select>
+        <button class="btn btn-outline btn-sm" onclick="promoSetupCopyYear()"><i class="fas fa-calendar-plus"></i> Copy year</button>
+      </div>
     </div>
   </div>
   <div class="card" style="padding:18px">
-    <div style="font-size:13px;font-weight:900;color:#0d1f3c;margin-bottom:10px"><i class="fas fa-table" style="color:#c9a84c"></i> All classes at a glance <span style="font-weight:600;color:#9aa8c0;font-size:11px">(click a row to edit it)</span></div>
+    <div style="font-size:13px;font-weight:900;color:#0d1f3c;margin-bottom:10px"><i class="fas fa-table" style="color:#c9a84c"></i> All classes at a glance — ${yr} <span style="font-weight:600;color:#9aa8c0;font-size:11px">(click a row to edit it)</span></div>
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead><tr style="background:#f8faff;color:#6b7a99;font-size:10px;text-transform:uppercase"><th style="padding:8px 10px;text-align:left">Class</th><th style="padding:8px 10px;text-align:right">Admission</th><th style="padding:8px 10px">Books</th><th style="padding:8px 10px;text-align:right">Books total</th><th style="padding:8px 10px;text-align:right">Full total</th></tr></thead>
       <tbody>${overview}</tbody></table></div>
@@ -9270,35 +9331,45 @@ function promoSetupInner(){
 }
 function promoSetupRefresh(){ const el=document.getElementById('promoSetupBody'); if(el) el.innerHTML=promoSetupInner(); }
 function promoSetupSelect(v){ window._promoSetupClass=v; promoSetupRefresh(); }
-function promoSetupSaveAdm(v){ setClassAdmissionFee(window._promoSetupClass,Math.max(0,parseFloat(v)||0)); toast('Admission fee saved'); promoSetupRefresh(); }
+function promoSetupYearSelect(v){ window._promoSetupYear=String(v); promoSetupRefresh(); }
+function promoSetupSaveAdm(v){ setClassAdmissionFee(window._promoSetupClass,Math.max(0,parseFloat(v)||0),promoSetupYear()); toast('Admission fee saved for '+promoSetupYear()); promoSetupRefresh(); }
 function promoSetupEditBook(id,field,v){
-  const cls=window._promoSetupClass;
-  setPromoBooks(cls,getPromoBooks(cls).map(b=>b.id===id?{...b,[field]:field==='price'?Math.max(0,parseFloat(v)||0):String(v).trim()}:b));
+  const cls=window._promoSetupClass, yr=promoSetupYear();
+  setPromoBooks(cls,getPromoBooks(cls,yr).map(b=>b.id===id?{...b,[field]:field==='price'?Math.max(0,parseFloat(v)||0):String(v).trim()}:b),yr);
   promoSetupRefresh();
 }
 function promoSetupAddBook(){
-  const cls=window._promoSetupClass;
+  const cls=window._promoSetupClass, yr=promoSetupYear();
   const name=(document.getElementById('psNewName')?.value||'').trim();
   const price=Math.max(0,parseFloat(document.getElementById('psNewPrice')?.value)||0);
   if(!name){ toast('Enter the book / item name','error'); return; }
-  setPromoBooks(cls,[...getPromoBooks(cls),{id:uid(),name,price}]);
+  setPromoBooks(cls,[...getPromoBooks(cls,yr),{id:uid(),name,price}],yr);
   promoSetupRefresh();
   setTimeout(()=>document.getElementById('psNewName')?.focus(),30);
 }
 function promoSetupDelBook(id){
   if(!confirm('Remove this book from the list?')) return;
-  const cls=window._promoSetupClass;
-  setPromoBooks(cls,getPromoBooks(cls).filter(b=>b.id!==id));
+  const cls=window._promoSetupClass, yr=promoSetupYear();
+  setPromoBooks(cls,getPromoBooks(cls,yr).filter(b=>b.id!==id),yr);
   promoSetupRefresh();
 }
 function promoSetupCopy(){
-  const cls=window._promoSetupClass, src=document.getElementById('psCopyFrom')?.value;
+  const cls=window._promoSetupClass, yr=promoSetupYear(), src=document.getElementById('psCopyFrom')?.value;
   if(!src||src===cls) return;
-  const sb=getPromoBooks(src);
-  if(!sb.length){ toast(`${src} has no books set`,'error'); return; }
-  if(getPromoBooks(cls).length && !confirm(`Replace the book list of ${cls} with the list from ${src}?`)) return;
-  setPromoBooks(cls,sb.map(b=>({id:uid(),name:b.name,price:b.price})));
+  const sb=getPromoBooks(src,yr);
+  if(!sb.length){ toast(`${src} has no books set for ${yr}`,'error'); return; }
+  if(getPromoBooks(cls,yr).length && !confirm(`Replace the book list of ${cls} (${yr}) with the list from ${src}?`)) return;
+  setPromoBooks(cls,sb.map(b=>({id:uid(),name:b.name,price:b.price})),yr);
   toast('Book list copied'); promoSetupRefresh();
+}
+function promoSetupCopyYear(){
+  const yr=promoSetupYear(), src=document.getElementById('psCopyYear')?.value;
+  if(!src||src===yr) return;
+  if(!confirm(`Copy admission fees and books of ALL classes from ${src} to ${yr}? This replaces what is saved for ${yr}.`)) return;
+  getAllClasses().forEach(c=>{
+    promoSetupEntrySet(c,yr,{admission:getClassAdmissionFee(c,src),books:getPromoBooks(c,src).map(b=>({...b}))});
+  });
+  toast(`All classes copied from ${src} to ${yr}`); promoSetupRefresh();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -9548,7 +9619,7 @@ function openPromoCharges(id){
   <div style="font-size:12px;font-weight:900;color:#0d1f3c;margin-bottom:6px">1. Admission fee for ${esc(toClass)} — ${toSession}</div>
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
     <input type="number" min="0" id="pmAdm" value="${plan.admTotal}" oninput="promoModalRecalc()" style="${inp};width:140px">
-    <span style="font-size:11px;color:#9aa8c0">Class default ${promoInr(getClassAdmissionFee(toClass))} — change for this student only if needed (0 = waived)</span></div>
+    <span style="font-size:11px;color:#9aa8c0">Class default ${promoInr(getClassAdmissionFee(toClass,toSession))} — change for this student only if needed (0 = waived)</span></div>
   <div style="font-size:12px;font-weight:900;color:#0d1f3c;margin-bottom:6px">2. Books &amp; items <span style="font-weight:600;color:#9aa8c0">— untick anything this student does not want</span></div>
   ${plan.books.length?`<div style="border:1.5px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:14px">
     ${plan.books.map((b,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid #f0f4ff">
@@ -9717,7 +9788,7 @@ function feesBooksMigrate(){
 // Admission fee and books are ONE combined fee:  admissionTotal = admission + books taken.
 function naBuild(s){
   const sf=(ls('fees')||{})[s.id]||{};
-  const clsBooks=getPromoBooks(s.class);
+  const clsBooks=getPromoBooks(s.class,s.session);
   const rec=(sf.books&&sf.books.combined&&String(sf.books.session)===String(s.session))?sf.books:null;
   let books;
   if(rec){
@@ -9733,7 +9804,7 @@ function naBuild(s){
   }
   const stored=parseFloat(sf.admissionTotal);
   const admOnly=rec?(rec.admissionFee!=null?(parseFloat(rec.admissionFee)||0):Math.max(0,(stored||0)-(parseFloat(rec.total)||0)))
-                   :(sf.admissionSet?(stored||0):(stored>0?stored:(parseFloat(getEffectiveFee(s.id,'admission',s.class))||0)));
+                   :(sf.admissionSet?(stored||0):(stored>0?stored:((sf.customFee&&sf.customFee.admissionFee!=null)?(parseFloat(sf.customFee.admissionFee)||0):getClassAdmissionFee(s.class,s.session))));
   return {plan:{admTotal:admOnly,books,paid:parseFloat(sf.admissionPaid)||0}};
 }
 // Make sure every advance-admitted student has a saved record, so Fee Register / Collect Fee /
@@ -9756,7 +9827,7 @@ function naEnsureRecords(students){
 function naTotals(s){ const {plan}=naBuild(s); return {plan,t:promoPlanTotals(plan)}; }
 function naRefresh(){
   const el=document.getElementById('ptNewAdmission'); if(!el) return;
-  const nxt=String(parseInt(getActiveSession())+1);
+  const nxt=String(window._naYear||(parseInt(getActiveSession())+1));
   el.innerHTML=buildNewAdmissionPanel(nxt,ls('sessions')||['2025','2026','2027','2028']);
 }
 function naRefreshAll(){ naRefresh(); if(document.getElementById('feeRegisterTable')&&typeof loadFeeRegister==='function') loadFeeRegister(); }
@@ -9773,7 +9844,7 @@ function openNewAdmCharges(id){
   <div style="font-size:12px;font-weight:900;color:#0d1f3c;margin-bottom:6px">1. Admission fee</div>
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
     <input type="number" min="0" id="naAdm" value="${plan.admTotal}" oninput="naModalRecalc()" style="${inp};width:140px">
-    <span style="font-size:11px;color:#9aa8c0">Class default ${promoInr(getClassAdmissionFee(s.class))} — change for this student only if needed (0 = waived)</span></div>
+    <span style="font-size:11px;color:#9aa8c0">Class default ${promoInr(getClassAdmissionFee(s.class,s.session))} (${s.session}) — change for this student only if needed (0 = waived)</span></div>
   <div style="font-size:12px;font-weight:900;color:#0d1f3c;margin-bottom:6px">2. Books &amp; items <span style="font-weight:600;color:#9aa8c0">— untick anything this student does not take</span></div>
   ${plan.books.length?`<div style="border:1.5px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:14px">
     ${plan.books.map((b,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid #f0f4ff">
@@ -10373,7 +10444,7 @@ function clearAllData(){
 // ═══════════════════════════════════════════════════════════════════════
 //  CLOUD SYNC (Supabase) — auto-sync + manual backup/restore, multi-device
 // ═══════════════════════════════════════════════════════════════════════
-const CLOUD_SYNC_KEYS=['users','students','teachers','fees','attendance','marks','notices','calendar','stock','sales','expenses','routine','classSubjects','ageRanges','feeStructure','activeSession','receipts','idCardLayout','studentFollowUps','attentionSettings','academicHistory','syllabus','teacherAbsent','periodTimings','settings','sessions','substituteAssignments','examRegisterMarks','marksSourceLog','marksSubmissionDeadline','govRecords','govSubmissionHistory','govActivityLog','govAgeRules','transferCertificates','workloadThresholds','dismissal','dismissalSettings','promoBooks','promoPayments'];
+const CLOUD_SYNC_KEYS=['users','students','teachers','fees','attendance','marks','notices','calendar','stock','sales','expenses','routine','classSubjects','ageRanges','feeStructure','activeSession','receipts','idCardLayout','studentFollowUps','attentionSettings','academicHistory','syllabus','teacherAbsent','periodTimings','settings','sessions','substituteAssignments','examRegisterMarks','marksSourceLog','marksSubmissionDeadline','govRecords','govSubmissionHistory','govActivityLog','govAgeRules','transferCertificates','workloadThresholds','dismissal','dismissalSettings','promoBooks','promoPayments','promoSetup'];
 
 let _sbClient=null, _sbUser=null, _sbChannel=null, _sbPushTimers={}, _sbBusy=false;
 const _sbOrigin='dev_'+Math.random().toString(36).slice(2)+'_'+Date.now();
@@ -22306,6 +22377,7 @@ function printTop10Certificate(){
 // ===========================
 
 function openAddStudent(){
+  window._naFromAdm=false;
   const session = getActiveSession();
   const classes = getAllClasses();
   const sVals={district:'SOUTH TWENTY FOUR PARGANAS',block:'Magrahat-II',policeStation:'Magrahat'};
@@ -22366,6 +22438,7 @@ function saveNewStudent(){
 
   const newStudent = {
     id: uid(),
+    newAdmission: !!window._naFromAdm,
     studentId: `CPS${session}-${String(students.filter(x=>x.session===session).length+1).padStart(3,'0')}`,
     name, roll: parseInt(roll)||roll,
     class: cls, section, session,
@@ -22376,8 +22449,9 @@ function saveNewStudent(){
   ss('students', students);
   closeModal();
   toast(`✅ ${name} added successfully!`);
-  if(parseInt(session)>parseInt(getActiveSession())){
-    // advance admission: collect admission fee + books straight away
+  if(window._naFromAdm){
+    window._naFromAdm=false; window._naYear=String(session);
+    // admission from the New Admissions tab: collect admission fee + books straight away
     naEnsureRecords([newStudent]);
     showPage('promotion');
     setTimeout(()=>{ switchPromoTab('ptNewAdmission',document.querySelectorAll('.promo-tab')[2]); openNewAdmCharges(newStudent.id); },80);
